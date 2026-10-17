@@ -1,9 +1,19 @@
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { Invoice, UserProfile } from '../src/types';
 import { formatINR, numberToIndianWords } from '../src/utils/numberToWords';
+
+function escapeHtml(str: any): string {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 export function renderInvoiceHtml(invoice: Invoice, profile: UserProfile): string {
   const org = invoice.organization;
@@ -13,8 +23,8 @@ export function renderInvoiceHtml(invoice: Invoice, profile: UserProfile): strin
       (item, idx) => `
     <tr style="border-bottom: 1px solid #e5e7eb;">
       <td style="padding: 10px 10px; text-align: left; vertical-align: top; color: #374151;">${idx + 1}</td>
-      <td style="padding: 10px 10px; text-align: left; vertical-align: top; color: #111827;">${item.description.replace(/\n/g, '<br/>')}</td>
-      <td style="padding: 10px 10px; text-align: right; vertical-align: top; color: #374151;">${item.qty.toFixed(2)}</td>
+      <td style="padding: 10px 10px; text-align: left; vertical-align: top; color: #111827;">${escapeHtml(item.description).replace(/\n/g, '<br/>')}</td>
+      <td style="padding: 10px 10px; text-align: right; vertical-align: top; color: #374151;">${Number(item.qty || 0).toFixed(2)}</td>
       <td style="padding: 10px 10px; text-align: right; vertical-align: top; color: #374151;">${formatINR(item.rate)}</td>
       <td style="padding: 10px 10px; text-align: right; vertical-align: top; color: #111827; font-weight: 500;">${formatINR(item.amount)}</td>
     </tr>
@@ -26,7 +36,7 @@ export function renderInvoiceHtml(invoice: Invoice, profile: UserProfile): strin
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <title>${invoice.invoice_number}</title>
+  <title>${escapeHtml(invoice.invoice_number)}</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     @page {
@@ -69,16 +79,16 @@ export function renderInvoiceHtml(invoice: Invoice, profile: UserProfile): strin
           </div>
           <div style="font-size: 13px; color: #111827; line-height: 1.4;">
             <div style="font-size: 18px; font-weight: bold; color: #000000; margin-bottom: 3px;">
-              ${profile.name}
+              ${escapeHtml(profile.name)}
             </div>
-            ${profile.addressLine1 ? `<div>${profile.addressLine1}</div>` : ''}
-            ${profile.addressLine2 ? `<div>${profile.addressLine2}</div>` : ''}
-            ${profile.cityStateZip ? `<div>${profile.cityStateZip}</div>` : ''}
-            ${profile.country ? `<div>${profile.country}</div>` : ''}
-            ${profile.phone ? `<div>${profile.phone}</div>` : ''}
-            ${profile.email ? `<div>${profile.email}</div>` : ''}
-            ${profile.website ? `<div>${profile.website}</div>` : ''}
-            ${profile.showUdyamOnBill && profile.udyamNumber ? `<div style="font-weight: 600; margin-top: 2px; color: #1f2937;">Udyam Reg: ${profile.udyamNumber}</div>` : ''}
+            ${profile.addressLine1 ? `<div>${escapeHtml(profile.addressLine1)}</div>` : ''}
+            ${profile.addressLine2 ? `<div>${escapeHtml(profile.addressLine2)}</div>` : ''}
+            ${profile.cityStateZip ? `<div>${escapeHtml(profile.cityStateZip)}</div>` : ''}
+            ${profile.country ? `<div>${escapeHtml(profile.country)}</div>` : ''}
+            ${profile.phone ? `<div>${escapeHtml(profile.phone)}</div>` : ''}
+            ${profile.email ? `<div>${escapeHtml(profile.email)}</div>` : ''}
+            ${profile.website ? `<div>${escapeHtml(profile.website)}</div>` : ''}
+            ${profile.showUdyamOnBill && profile.udyamNumber ? `<div style="font-weight: 600; margin-top: 2px; color: #1f2937;">Udyam Reg: ${escapeHtml(profile.udyamNumber)}</div>` : ''}
           </div>
         </div>
 
@@ -86,12 +96,12 @@ export function renderInvoiceHtml(invoice: Invoice, profile: UserProfile): strin
           ${invoice.copy_type && invoice.copy_type !== 'NONE' ? `
             <div style="display: flex; justify-content: flex-end; margin-bottom: 6px;">
               <span style="border: 1px solid #9ca3af; border-radius: 2px; padding: 1px 8px; font-size: 9px; font-weight: 600; letter-spacing: 0.08em; color: #6b7280; text-transform: uppercase;">
-                ${invoice.copy_type}
+                ${escapeHtml(invoice.copy_type)}
               </span>
             </div>
           ` : ''}
           <div style="font-size: 24px; font-weight: bold; letter-spacing: 0.02em; color: #111827; text-transform: uppercase;">
-            ${invoice.doc_type || 'BILL OF SUPPLY'}
+            ${escapeHtml(invoice.doc_type || 'BILL OF SUPPLY')}
           </div>
         </div>
       </div>
@@ -99,16 +109,16 @@ export function renderInvoiceHtml(invoice: Invoice, profile: UserProfile): strin
       <!-- Meta Grid -->
       <div style="border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; padding: 10px 0; margin-bottom: 24px; font-size: 13px; display: grid; grid-template-columns: 130px 1fr; row-gap: 4px;">
         <div style="font-weight: 600; color: #374151;">#</div>
-        <div>: ${invoice.invoice_number}</div>
+        <div>: ${escapeHtml(invoice.invoice_number)}</div>
 
         <div style="font-weight: 600; color: #374151;">Invoice Date</div>
-        <div>: ${invoice.invoice_date}</div>
+        <div>: ${escapeHtml(invoice.invoice_date)}</div>
 
         <div style="font-weight: 600; color: #374151;">Terms</div>
-        <div>: ${invoice.terms}</div>
+        <div>: ${escapeHtml(invoice.terms)}</div>
 
         <div style="font-weight: 600; color: #374151;">Due Date</div>
-        <div>: ${invoice.due_date}</div>
+        <div>: ${escapeHtml(invoice.due_date)}</div>
       </div>
 
       <!-- Bill To -->
@@ -118,11 +128,11 @@ export function renderInvoiceHtml(invoice: Invoice, profile: UserProfile): strin
         </div>
         ${org ? `
           <div style="font-size: 13px; color: #1f2937; line-height: 1.4;">
-            <div style="font-weight: bold;">${org.name}</div>
-            ${org.address ? `<div>${org.address}</div>` : ''}
-            <div>${[org.city, org.pincode, org.state, org.country].filter(Boolean).join(' ')}</div>
-            ${org.phone ? `<div>Phone: ${org.phone}</div>` : ''}
-            ${org.email ? `<div>Email: ${org.email}</div>` : ''}
+            <div style="font-weight: bold;">${escapeHtml(org.name)}</div>
+            ${org.address ? `<div>${escapeHtml(org.address)}</div>` : ''}
+            <div>${[org.city, org.pincode, org.state, org.country].filter(Boolean).map(escapeHtml).join(' ')}</div>
+            ${org.phone ? `<div>Phone: ${escapeHtml(org.phone)}</div>` : ''}
+            ${org.email ? `<div>Email: ${escapeHtml(org.email)}</div>` : ''}
           </div>
         ` : `<div style="font-style: italic; color: #9ca3af;">No organization specified</div>`}
       </div>
@@ -151,7 +161,7 @@ export function renderInvoiceHtml(invoice: Invoice, profile: UserProfile): strin
               Total In Words
             </div>
             <div style="font-size: 13px; color: #374151; font-style: italic;">
-              ${numberToIndianWords(invoice.total)}
+              ${escapeHtml(numberToIndianWords(invoice.total))}
             </div>
           </div>
 
@@ -161,7 +171,7 @@ export function renderInvoiceHtml(invoice: Invoice, profile: UserProfile): strin
                 Notes
               </div>
               <div style="font-size: 13px; color: #374151; white-space: pre-line;">
-                ${invoice.notes}
+                ${escapeHtml(invoice.notes)}
               </div>
             </div>
           ` : ''}
@@ -172,7 +182,7 @@ export function renderInvoiceHtml(invoice: Invoice, profile: UserProfile): strin
                 Payment Options
               </div>
               <div style="font-size: 13px; color: #374151; white-space: pre-line;">
-                ${invoice.payment_options}
+                ${escapeHtml(invoice.payment_options)}
               </div>
             </div>
           ` : ''}
@@ -205,7 +215,7 @@ export function renderInvoiceHtml(invoice: Invoice, profile: UserProfile): strin
 
           <div style="text-align: right; margin-top: 48px;">
             <div style="font-size: 13px; font-weight: 600; color: #111827;">
-              ${profile.signatureText || 'Authorized Signature'}
+              ${escapeHtml(profile.signatureText || 'Authorized Signature')}
             </div>
           </div>
         </div>
@@ -243,15 +253,27 @@ export function generateVectorPdfBuffer(invoice: Invoice, profile: UserProfile):
     const binary = chromePaths.find((p) => fs.existsSync(p));
 
     if (!binary) {
+      try {
+        if (fs.existsSync(htmlPath)) fs.unlinkSync(htmlPath);
+      } catch {}
       reject(new Error('No Chromium or Google Chrome binary found on system.'));
       return;
     }
 
-    const cmd = `"${binary}" --headless --disable-gpu --no-pdf-header-footer --print-to-pdf="${pdfPath}" "${htmlPath}"`;
+    const args = [
+      '--headless',
+      '--disable-gpu',
+      '--no-pdf-header-footer',
+      `--print-to-pdf=${pdfPath}`,
+      htmlPath,
+    ];
 
-    exec(cmd, (err) => {
+    execFile(binary, args, { timeout: 20000 }, (err) => {
       try {
         if (err && !fs.existsSync(pdfPath)) {
+          try {
+            if (fs.existsSync(htmlPath)) fs.unlinkSync(htmlPath);
+          } catch {}
           reject(err);
           return;
         }
@@ -260,12 +282,16 @@ export function generateVectorPdfBuffer(invoice: Invoice, profile: UserProfile):
 
         // Cleanup temp files
         try {
-          fs.unlinkSync(htmlPath);
-          fs.unlinkSync(pdfPath);
+          if (fs.existsSync(htmlPath)) fs.unlinkSync(htmlPath);
+          if (fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
         } catch {}
 
         resolve(buffer);
       } catch (e) {
+        try {
+          if (fs.existsSync(htmlPath)) fs.unlinkSync(htmlPath);
+          if (fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
+        } catch {}
         reject(e);
       }
     });

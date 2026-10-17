@@ -260,7 +260,7 @@ export const PrintableMonthlyReport: React.FC<PrintableMonthlyReportProps> = ({
                 </div>
                 {profile.phone && profile.email && (
                   <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>
-                    {profile.phone} • {profile.email} • {profile.address || 'India'}
+                    {profile.phone} • {profile.email} • {profile.addressLine1 || profile.cityStateZip || 'India'}
                   </div>
                 )}
               </div>

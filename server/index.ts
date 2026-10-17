@@ -10,8 +10,36 @@ import { Invoice, Organization, UserProfile, NumberingSettings, CatalogItem } fr
 const app = express();
 const PORT = process.env.PORT || 5001;
 
-app.use(cors());
-app.use(express.json());
+const ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:5001',
+  'http://127.0.0.1:5001',
+  'http://localhost:8080',
+  'http://127.0.0.1:8080',
+];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (e.g. curl, native client, server-to-server) or from allowed origins
+      if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error('Blocked by CORS policy for untrusted origin.'));
+    },
+    credentials: true,
+  })
+);
+
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  next();
+});
+
+app.use(express.json({ limit: '15mb' }));
 
 // Helper to map DB row to Invoice object
 function mapInvoiceRow(row: any, orgRow?: any): Invoice {
@@ -547,94 +575,379 @@ app.post('/api/export-pdf', async (req: Request, res: Response) => {
 // ----------------- BACKUP & RESTORE -----------------
 
 app.get('/api/backup', (_req: Request, res: Response) => {
-  const orgs = db.prepare('SELECT * FROM organizations').all();
-  const invoices = db.prepare('SELECT * FROM invoices').all();
-  const settings = db.prepare('SELECT * FROM settings').all();
-  const catalog = db.prepare('SELECT * FROM catalog_items').all();
+  try {
+    const orgs = db.prepare('SELECT * FROM organizations').all();
+    const invoices = db.prepare('SELECT * FROM invoices').all();
+    const settings = db.prepare('SELECT * FROM settings').all();
+    const catalog = db.prepare('SELECT * FROM catalog_items').all();
+    const expenses = db.prepare('SELECT * FROM expenses').all();
+    const income = db.prepare('SELECT * FROM income_entries').all();
+    const borrow = db.prepare('SELECT * FROM borrow_records').all();
+    const summaries = db.prepare('SELECT * FROM monthly_budget_summaries').all();
+    const goals = db.prepare('SELECT * FROM financial_goals').all();
+    const allocationRules = db.prepare('SELECT * FROM budget_allocation_rules').all();
+    const taxReminders = db.prepare('SELECT * FROM tax_reminders').all();
+    const sbiPpsCheques = db.prepare('SELECT * FROM sbi_pps_cheques').all();
+    const withdrawals = db.prepare('SELECT * FROM current_account_withdrawals').all();
+    const recurring = db.prepare('SELECT * FROM recurring_schedules').all();
 
-  res.setHeader('Content-Disposition', `attachment; filename="billings-backup-${new Date().toISOString().slice(0, 10)}.json"`);
-  res.json({
-    version: '1.0',
-    timestamp: new Date().toISOString(),
-    organizations: orgs,
-    invoices,
-    settings,
-    catalog,
-  });
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="billings-full-backup-${new Date().toISOString().slice(0, 10)}.json"`
+    );
+    res.json({
+      version: '2.0',
+      timestamp: new Date().toISOString(),
+      organizations: orgs,
+      invoices,
+      settings,
+      catalog,
+      expenses,
+      income,
+      borrow,
+      summaries,
+      goals,
+      allocationRules,
+      taxReminders,
+      sbiPpsCheques,
+      withdrawals,
+      recurring,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/backup/restore', (req: Request, res: Response) => {
   const data = req.body;
-  if (!data || !data.organizations || !data.invoices) {
-    res.status(400).json({ error: 'Invalid backup format' });
+  if (!data || (!data.organizations && !data.invoices && !data.expenses)) {
+    res.status(400).json({ error: 'Invalid backup format. Backup must contain recognizable system data.' });
     return;
   }
 
   const transaction = db.transaction(() => {
-    db.prepare('DELETE FROM invoices').run();
-    db.prepare('DELETE FROM organizations').run();
-    db.prepare('DELETE FROM catalog_items').run();
-
-    const insertOrg = db.prepare(`
-      INSERT INTO organizations (id, name, address, city, state, pincode, country, phone, email, notes, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    for (const org of data.organizations) {
-      insertOrg.run(
-        org.id,
-        org.name,
-        org.address,
-        org.city,
-        org.state,
-        org.pincode,
-        org.country,
-        org.phone,
-        org.email,
-        org.notes,
-        org.created_at || new Date().toISOString()
-      );
+    // 1. Invoices & Organizations & Catalog
+    if (Array.isArray(data.invoices)) {
+      db.prepare('DELETE FROM invoices').run();
+    }
+    if (Array.isArray(data.organizations)) {
+      db.prepare('DELETE FROM organizations').run();
+    }
+    if (Array.isArray(data.catalog)) {
+      db.prepare('DELETE FROM catalog_items').run();
     }
 
-    const insertInv = db.prepare(`
-      INSERT INTO invoices (
-        id, invoice_number, doc_type, organization_id, invoice_date, terms, due_date,
-        items_json, sub_total, total, amount_paid, balance_due, notes, payment_options, status, copy_type, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    for (const inv of data.invoices) {
-      insertInv.run(
-        inv.id,
-        inv.invoice_number,
-        inv.doc_type,
-        inv.organization_id,
-        inv.invoice_date,
-        inv.terms,
-        inv.due_date,
-        inv.items_json,
-        inv.sub_total,
-        inv.total,
-        inv.amount_paid,
-        inv.balance_due,
-        inv.notes,
-        inv.payment_options,
-        inv.status,
-        inv.copy_type || 'ORIGINAL',
-        inv.created_at || new Date().toISOString()
-      );
+    if (Array.isArray(data.organizations)) {
+      const insertOrg = db.prepare(`
+        INSERT INTO organizations (id, name, address, city, state, pincode, country, phone, email, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const org of data.organizations) {
+        insertOrg.run(
+          org.id,
+          org.name,
+          org.address || '',
+          org.city || '',
+          org.state || '',
+          org.pincode || '',
+          org.country || 'India',
+          org.phone || '',
+          org.email || '',
+          org.notes || '',
+          org.created_at || new Date().toISOString()
+        );
+      }
     }
 
-    if (data.catalog) {
-      const insertCat = db.prepare('INSERT INTO catalog_items (id, name, description, default_rate) VALUES (?, ?, ?, ?)');
+    if (Array.isArray(data.invoices)) {
+      const insertInv = db.prepare(`
+        INSERT INTO invoices (
+          id, invoice_number, doc_type, organization_id, invoice_date, terms, due_date,
+          items_json, sub_total, total, amount_paid, balance_due, notes, payment_options, status, copy_type, hide_qty, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const inv of data.invoices) {
+        insertInv.run(
+          inv.id,
+          inv.invoice_number,
+          inv.doc_type || 'BILL OF SUPPLY',
+          inv.organization_id,
+          inv.invoice_date,
+          inv.terms || 'Due on Receipt',
+          inv.due_date || inv.invoice_date,
+          inv.items_json || '[]',
+          Number(inv.sub_total || 0),
+          Number(inv.total || 0),
+          Number(inv.amount_paid || 0),
+          Number(inv.balance_due || 0),
+          inv.notes || '',
+          inv.payment_options || '',
+          inv.status || 'issued',
+          inv.copy_type || 'ORIGINAL',
+          inv.hide_qty ? 1 : 0,
+          inv.created_at || new Date().toISOString()
+        );
+      }
+    }
+
+    if (Array.isArray(data.catalog)) {
+      const insertCat = db.prepare(
+        'INSERT INTO catalog_items (id, name, description, default_rate) VALUES (?, ?, ?, ?)'
+      );
       for (const item of data.catalog) {
-        insertCat.run(item.id, item.name, item.description, item.default_rate);
+        insertCat.run(item.id, item.name, item.description || '', Number(item.default_rate || 0));
+      }
+    }
+
+    // 2. Settings
+    if (Array.isArray(data.settings)) {
+      const upsertSetting = db.prepare(`
+        INSERT INTO settings (key, value_json) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
+      `);
+      for (const s of data.settings) {
+        upsertSetting.run(s.key, typeof s.value_json === 'string' ? s.value_json : JSON.stringify(s.value_json));
+      }
+    }
+
+    // 3. Expenses
+    if (Array.isArray(data.expenses)) {
+      db.prepare('DELETE FROM expenses').run();
+      const insertExp = db.prepare(`
+        INSERT INTO expenses (
+          id, date, month, category, tag, description, amount, payment_method, notes,
+          tax_classification, business_percentage, gst_rate, gst_itc_eligible, has_invoice_voucher, voucher_ref, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const exp of data.expenses) {
+        insertExp.run(
+          exp.id,
+          exp.date,
+          exp.month || exp.date.slice(0, 7),
+          exp.category || 'reg',
+          exp.tag || '',
+          exp.description || '',
+          Number(exp.amount || 0),
+          exp.payment_method || 'UPI / Bank',
+          exp.notes || '',
+          exp.tax_classification || 'BUSINESS_DEDUCTIBLE',
+          exp.business_percentage !== undefined ? Number(exp.business_percentage) : 100,
+          Number(exp.gst_rate || 0),
+          exp.gst_itc_eligible ? 1 : 0,
+          exp.has_invoice_voucher !== undefined ? (exp.has_invoice_voucher ? 1 : 0) : 1,
+          exp.voucher_ref || '',
+          exp.created_at || new Date().toISOString()
+        );
+      }
+    }
+
+    // 4. Income entries
+    if (Array.isArray(data.income)) {
+      db.prepare('DELETE FROM income_entries').run();
+      const insertInc = db.prepare(`
+        INSERT INTO income_entries (id, date, month, category, source, amount, invoice_id, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const inc of data.income) {
+        insertInc.run(
+          inc.id,
+          inc.date,
+          inc.month || inc.date.slice(0, 7),
+          inc.category || 'fl',
+          inc.source || '',
+          Number(inc.amount || 0),
+          inc.invoice_id || null,
+          inc.notes || '',
+          inc.created_at || new Date().toISOString()
+        );
+      }
+    }
+
+    // 5. Borrow records
+    if (Array.isArray(data.borrow)) {
+      db.prepare('DELETE FROM borrow_records').run();
+      const insertBr = db.prepare(`
+        INSERT INTO borrow_records (id, date, month, type, person, reason, amount, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const br of data.borrow) {
+        insertBr.run(
+          br.id,
+          br.date,
+          br.month || br.date.slice(0, 7),
+          br.type || 'BORROW',
+          br.person || '',
+          br.reason || '',
+          Number(br.amount || 0),
+          br.status || 'PENDING',
+          br.created_at || new Date().toISOString()
+        );
+      }
+    }
+
+    // 6. Monthly budget summaries
+    if (Array.isArray(data.summaries)) {
+      db.prepare('DELETE FROM monthly_budget_summaries').run();
+      const insertSum = db.prepare(`
+        INSERT INTO monthly_budget_summaries (
+          month, starting_debt, previous_remaining, dept_payment, borrow_amount, reg_savings, ext_savings, notes, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const s of data.summaries) {
+        insertSum.run(
+          s.month,
+          Number(s.starting_debt || 0),
+          Number(s.previous_remaining || 0),
+          Number(s.dept_payment || 0),
+          Number(s.borrow_amount || 0),
+          Number(s.reg_savings || 0),
+          Number(s.ext_savings || 0),
+          s.notes || '',
+          s.updated_at || new Date().toISOString()
+        );
+      }
+    }
+
+    // 7. Goals
+    if (Array.isArray(data.goals)) {
+      db.prepare('DELETE FROM financial_goals').run();
+      const insertGoal = db.prepare(`
+        INSERT INTO financial_goals (id, name, target_amount, savings_percent, saved_amount, target_date, status, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const g of data.goals) {
+        insertGoal.run(
+          g.id,
+          g.name,
+          Number(g.target_amount || 0),
+          Number(g.savings_percent || 0),
+          Number(g.saved_amount || 0),
+          g.target_date || '',
+          g.status || 'IN_PROGRESS',
+          g.notes || '',
+          g.created_at || new Date().toISOString()
+        );
+      }
+    }
+
+    // 8. Allocation rules
+    if (Array.isArray(data.allocationRules)) {
+      db.prepare('DELETE FROM budget_allocation_rules').run();
+      const insertRule = db.prepare(`
+        INSERT INTO budget_allocation_rules (id, category, percentage, display_order)
+        VALUES (?, ?, ?, ?)
+      `);
+      for (const r of data.allocationRules) {
+        insertRule.run(r.id, r.category, Number(r.percentage || 0), Number(r.display_order || 0));
+      }
+    }
+
+    // 9. Tax Reminders
+    if (Array.isArray(data.taxReminders)) {
+      db.prepare('DELETE FROM tax_reminders').run();
+      const insertRem = db.prepare(`
+        INSERT INTO tax_reminders (
+          id, title, description, due_date, category, is_recurring, frequency, is_completed, completed_at, notify_before_days, priority, penalty_note, action_url, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const rem of data.taxReminders) {
+        insertRem.run(
+          rem.id,
+          rem.title,
+          rem.description || '',
+          rem.due_date,
+          rem.category || 'CUSTOM',
+          rem.is_recurring ? 1 : 0,
+          rem.frequency || 'ONCE',
+          rem.is_completed ? 1 : 0,
+          rem.completed_at || null,
+          Number(rem.notify_before_days || 7),
+          rem.priority || 'HIGH',
+          rem.penalty_note || '',
+          rem.action_url || '',
+          rem.created_at || new Date().toISOString()
+        );
+      }
+    }
+
+    // 10. SBI PPS Cheques
+    if (Array.isArray(data.sbiPpsCheques)) {
+      db.prepare('DELETE FROM sbi_pps_cheques').run();
+      const insertPps = db.prepare(`
+        INSERT INTO sbi_pps_cheques (id, cheque_number, payee_name, amount, issue_date, account_number, pps_status, pps_reference, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const p of data.sbiPpsCheques) {
+        insertPps.run(
+          p.id,
+          String(p.cheque_number),
+          p.payee_name,
+          Number(p.amount || 0),
+          p.issue_date,
+          p.account_number || '45661497562',
+          p.pps_status || 'PENDING_REGISTRATION',
+          p.pps_reference || null,
+          p.notes || null,
+          p.created_at || new Date().toISOString()
+        );
+      }
+    }
+
+    // 11. Current Account Withdrawals
+    if (Array.isArray(data.withdrawals)) {
+      db.prepare('DELETE FROM current_account_withdrawals').run();
+      const insertWith = db.prepare(`
+        INSERT INTO current_account_withdrawals (id, date, month, amount, notes, income_entry_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const w of data.withdrawals) {
+        insertWith.run(
+          w.id,
+          w.date,
+          w.month || w.date.slice(0, 7),
+          Number(w.amount || 0),
+          w.notes || null,
+          w.income_entry_id || null,
+          w.created_at || new Date().toISOString()
+        );
+      }
+    }
+
+    // 12. Recurring Schedules
+    if (Array.isArray(data.recurring)) {
+      db.prepare('DELETE FROM recurring_schedules').run();
+      const insertSched = db.prepare(`
+        INSERT INTO recurring_schedules (
+          id, name, organization_id, schedule_type, doc_type, monthly_day, total_amount, milestones_json, items_json, terms, notes, status, last_run_date, next_run_date, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const r of data.recurring) {
+        insertSched.run(
+          r.id,
+          r.name,
+          r.organization_id,
+          r.schedule_type || 'MONTHLY_SUBSCRIPTION',
+          r.doc_type || 'BILL OF SUPPLY',
+          r.monthly_day || 1,
+          r.total_amount ? Number(r.total_amount) : null,
+          r.milestones_json || null,
+          r.items_json || null,
+          r.terms || 'Due on Receipt',
+          r.notes || null,
+          r.status || 'ACTIVE',
+          r.last_run_date || null,
+          r.next_run_date || null,
+          r.created_at || new Date().toISOString()
+        );
       }
     }
   });
 
   try {
     transaction();
-    res.json({ success: true, message: 'Database restored successfully' });
+    res.json({ success: true, message: 'All database tables restored successfully.' });
   } catch (err: any) {
+    console.error('Database restore error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -642,70 +955,74 @@ app.post('/api/backup/restore', (req: Request, res: Response) => {
 // ----------------- RECURRING SCHEDULES & AUTOMATIONS -----------------
 
 function generateNextInvoiceNumberInternal(docType: string): string {
-  const numberingRow: any = db.prepare('SELECT value_json FROM settings WHERE key = ?').get('numbering');
-  const numbering = numberingRow
-    ? JSON.parse(numberingRow.value_json)
-    : {
-        billOfSupplyPrefix: 'BOS-',
-        invoicePrefix: 'INV-',
-        estimatePrefix: 'EST-',
-        receiptPrefix: 'REC-',
-        nextNumberBOS: 1,
-        nextNumberINV: 1,
-        nextNumberEST: 1,
-        nextNumberREC: 1,
-      };
+  const getNextNumberTx = db.transaction(() => {
+    const numberingRow: any = db.prepare('SELECT value_json FROM settings WHERE key = ?').get('numbering');
+    const numbering = numberingRow
+      ? JSON.parse(numberingRow.value_json)
+      : {
+          billOfSupplyPrefix: 'BOS-',
+          invoicePrefix: 'INV-',
+          estimatePrefix: 'EST-',
+          receiptPrefix: 'REC-',
+          nextNumberBOS: 1,
+          nextNumberINV: 1,
+          nextNumberEST: 1,
+          nextNumberREC: 1,
+        };
 
-  let prefix = numbering.billOfSupplyPrefix || 'BOS-';
-  let seq = numbering.nextNumberBOS || 1;
+    let prefix = numbering.billOfSupplyPrefix || 'BOS-';
+    let seq = numbering.nextNumberBOS || 1;
 
-  if (docType === 'INVOICE') {
-    prefix = numbering.invoicePrefix || 'INV-';
-    seq = numbering.nextNumberINV || 1;
-  } else if (docType === 'ESTIMATE' || docType === 'PROFORMA') {
-    prefix = numbering.estimatePrefix || 'EST-';
-    seq = numbering.nextNumberEST || 1;
-  } else if (docType === 'RECEIPT') {
-    prefix = numbering.receiptPrefix || 'REC-';
-    seq = numbering.nextNumberREC || 1;
-  }
+    if (docType === 'INVOICE') {
+      prefix = numbering.invoicePrefix || 'INV-';
+      seq = numbering.nextNumberINV || 1;
+    } else if (docType === 'ESTIMATE' || docType === 'PROFORMA') {
+      prefix = numbering.estimatePrefix || 'EST-';
+      seq = numbering.nextNumberEST || 1;
+    } else if (docType === 'RECEIPT') {
+      prefix = numbering.receiptPrefix || 'REC-';
+      seq = numbering.nextNumberREC || 1;
+    }
 
-  // Scan existing invoices in the database
-  const existingInvoices = db.prepare('SELECT invoice_number, doc_type FROM invoices').all() as {
-    invoice_number: string;
-    doc_type: string;
-  }[];
+    // Scan existing invoices in the database
+    const existingInvoices = db.prepare('SELECT invoice_number, doc_type FROM invoices').all() as {
+      invoice_number: string;
+      doc_type: string;
+    }[];
 
-  let maxNumInDb = 0;
-  for (const inv of existingInvoices) {
-    const invNum = inv.invoice_number || '';
-    const numMatch = invNum.match(/\d+$/);
-    if (numMatch) {
-      const n = parseInt(numMatch[0], 10);
-      if (invNum.startsWith(prefix) || inv.doc_type === docType) {
-        if (n > maxNumInDb) {
-          maxNumInDb = n;
+    let maxNumInDb = 0;
+    for (const inv of existingInvoices) {
+      const invNum = inv.invoice_number || '';
+      const numMatch = invNum.match(/\d+$/);
+      if (numMatch) {
+        const n = parseInt(numMatch[0], 10);
+        if (invNum.startsWith(prefix) || inv.doc_type === docType) {
+          if (n > maxNumInDb) {
+            maxNumInDb = n;
+          }
         }
       }
     }
-  }
 
-  if (maxNumInDb >= seq) {
-    seq = maxNumInDb + 1;
-  }
+    if (maxNumInDb >= seq) {
+      seq = maxNumInDb + 1;
+    }
 
-  if (docType === 'INVOICE') {
-    numbering.nextNumberINV = seq + 1;
-  } else if (docType === 'ESTIMATE' || docType === 'PROFORMA') {
-    numbering.nextNumberEST = seq + 1;
-  } else if (docType === 'RECEIPT') {
-    numbering.nextNumberREC = seq + 1;
-  } else {
-    numbering.nextNumberBOS = seq + 1;
-  }
+    if (docType === 'INVOICE') {
+      numbering.nextNumberINV = seq + 1;
+    } else if (docType === 'ESTIMATE' || docType === 'PROFORMA') {
+      numbering.nextNumberEST = seq + 1;
+    } else if (docType === 'RECEIPT') {
+      numbering.nextNumberREC = seq + 1;
+    } else {
+      numbering.nextNumberBOS = seq + 1;
+    }
 
-  db.prepare('UPDATE settings SET value_json = ? WHERE key = ?').run(JSON.stringify(numbering), 'numbering');
-  return `${prefix}${String(seq).padStart(6, '0')}`;
+    db.prepare('UPDATE settings SET value_json = ? WHERE key = ?').run(JSON.stringify(numbering), 'numbering');
+    return `${prefix}${String(seq).padStart(6, '0')}`;
+  });
+
+  return getNextNumberTx();
 }
 
 function formatDateToDDMMYYYY(dateStr: string): string {
@@ -719,12 +1036,16 @@ function formatDateToDDMMYYYY(dateStr: string): string {
 }
 
 function calculateNextMonthlyRunDate(currentDateStr: string, targetDay: number): string {
+  if (!currentDateStr || isNaN(Date.parse(currentDateStr))) {
+    currentDateStr = new Date().toISOString().split('T')[0];
+  }
   const d = new Date(currentDateStr);
+  const safeTargetDay = isNaN(targetDay) || targetDay < 1 ? 1 : Math.min(31, Math.floor(targetDay));
   d.setMonth(d.getMonth() + 1);
   const year = d.getFullYear();
   const month = d.getMonth();
   const maxDays = new Date(year, month + 1, 0).getDate();
-  const day = Math.min(targetDay, maxDays);
+  const day = Math.min(safeTargetDay, maxDays);
   const mm = String(month + 1).padStart(2, '0');
   const dd = String(day).padStart(2, '0');
   return `${year}-${mm}-${dd}`;
@@ -863,7 +1184,6 @@ try {
 
 app.get('/api/recurring', (_req: Request, res: Response) => {
   try {
-    evaluateAndRunDueSchedules();
     const rows: any[] = db
       .prepare(`
         SELECT r.*, o.name as org_name

@@ -22,7 +22,7 @@ export const SpreadsheetPage: React.FC<SpreadsheetPageProps> = ({ profile }) => 
 
   useEffect(() => {
     fetchMonths();
-  }, []);
+  }, [refreshKey]);
 
   const fetchMonths = async () => {
     try {
@@ -109,18 +109,26 @@ export const SpreadsheetPage: React.FC<SpreadsheetPageProps> = ({ profile }) => 
           allocations={allocations}
           profile={profile || {
             name: 'Suren',
-            businessName: 'Personal Budget',
+            addressLine1: '',
+            addressLine2: '',
+            cityStateZip: 'Jharkhand, India',
+            country: 'India',
             email: '',
             phone: '',
-            address: '',
+            website: '',
+            udyamNumber: '',
+            showUdyamOnBill: false,
             bankName: 'State Bank of India',
             accountNumber: '45661497562',
             ifscCode: 'SBIN0014355',
-            branch: '',
-            gstin: '',
-            pan: '',
-            notes: '',
-            terms: '',
+            accountHolder: 'Suren',
+            upiId: '',
+            showBankDetailsOnBill: true,
+            showUpiOnBill: false,
+            showQrOnBill: false,
+            defaultNotes: '',
+            defaultTerms: '',
+            signatureText: 'Authorized Signatory',
           }}
           monthStr={selectedMonth}
           availableMonths={availableMonths}

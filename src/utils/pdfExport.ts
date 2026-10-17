@@ -58,7 +58,7 @@ export async function downloadInvoicePdf(invoice: Invoice, profile?: UserProfile
       qrCodeUrl,
     });
 
-    const blob = await pdf(docElement).toBlob();
+    const blob = await pdf(docElement as any).toBlob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

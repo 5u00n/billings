@@ -44,17 +44,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Check allowed emails list from env or localStorage
+  // Check allowed emails list strictly from environment configuration
   const allowedEmailsStr = import.meta.env.VITE_ALLOWED_EMAILS || '';
-  const storedAllowed = (() => {
-    try {
-      return localStorage.getItem('billings_allowed_emails') || '';
-    } catch {
-      return '';
-    }
-  })();
-  const combinedEmails = [allowedEmailsStr, storedAllowed].filter(Boolean).join(',');
-  const allowedEmails = combinedEmails
+  const allowedEmails = allowedEmailsStr
     .split(',')
     .map((e: string) => e.trim().toLowerCase())
     .filter(Boolean);
@@ -71,7 +63,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
         if (fbUser) {
           if (!validateAllowedUser(fbUser.email)) {
-            signOut(auth);
+            if (auth) signOut(auth);
             setError(`Access restricted. Email ${fbUser.email} is not in the allowed administrator list.`);
             setUser(null);
             setFirebaseUser(null);

@@ -15,14 +15,14 @@ import {
   CheckCircle2,
   Settings,
   ArrowRight,
-  Sparkles,
   Server,
   X,
-  ExternalLink,
+  ChevronDown,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
+import { Card, CardContent } from '../ui/card';
+import { cn } from '../../lib/utils';
 
 export const LoginPage: React.FC = () => {
   const {
@@ -42,6 +42,7 @@ export const LoginPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [resetSent, setResetSent] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
+  const [isEmailExpanded, setIsEmailExpanded] = useState(false);
 
   // Config modal state
   const currentConfig = getActiveFirebaseConfig() || {};
@@ -110,27 +111,25 @@ export const LoginPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between font-sans selection:bg-blue-600 selection:text-white">
-      {/* Top Banner / Security Bar */}
-      <header className="border-b border-slate-800/80 bg-slate-900/40 px-6 py-3 flex items-center justify-between text-xs">
+      {/* Top Header */}
+      <header className="border-b border-slate-800/80 bg-slate-900/30 px-6 py-3.5 flex items-center justify-between text-xs backdrop-blur-xs">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white text-sm shadow-xs">
+          <div className="w-7 h-7 rounded-lg bg-blue-600/90 flex items-center justify-center font-bold text-white text-sm shadow-xs">
             H
           </div>
-          <span className="font-semibold text-slate-200">Suren Billings</span>
-          <span className="text-slate-600 hidden sm:inline">•</span>
-          <span className="text-slate-400 hidden sm:inline">Financial Suite & Billing Gateway</span>
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-slate-200 tracking-tight">Suren Billings</span>
+            <span className="text-slate-700 hidden sm:inline">•</span>
+            <span className="text-slate-400 text-xs hidden sm:inline">Workspace Portal</span>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 text-[11px] text-emerald-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Encrypted Portal</span>
-          </div>
-
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] text-slate-500 hidden sm:inline font-mono">Chakulia, IN</span>
           <button
             onClick={() => setShowConfigModal(true)}
             title="Firebase Deployment Settings"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 transition-colors cursor-pointer"
           >
             <Settings className="w-4 h-4" />
           </button>
@@ -139,43 +138,43 @@ export const LoginPage: React.FC = () => {
 
       {/* Center Auth Card */}
       <main className="flex-1 flex items-center justify-center p-4 sm:p-6">
-        <div className="w-full max-w-md space-y-5">
+        <div className="w-full max-w-sm space-y-4">
           {/* Card Title Header */}
-          <div className="text-center space-y-1.5">
-            <h1 className="text-2xl font-bold tracking-tight text-white">
-              {mode === 'signin' && 'Sign in to your account'}
+          <div className="text-center space-y-1">
+            <h1 className="text-xl font-bold tracking-tight text-white">
+              {mode === 'signin' && 'Sign in to workspace'}
               {mode === 'signup' && 'Create your account'}
-              {mode === 'reset' && 'Reset your password'}
+              {mode === 'reset' && 'Reset account password'}
             </h1>
             <p className="text-xs text-slate-400">
-              {mode === 'signin' && 'Enter your credentials or use Google to access your financial records.'}
-              {mode === 'signup' && 'Register your email to manage personal budget and client billings.'}
-              {mode === 'reset' && 'Enter your verified account email to receive a password reset link.'}
+              {mode === 'signin' && 'Access invoices, accounts, and tax audit records.'}
+              {mode === 'signup' && 'Register your authorized administrator account.'}
+              {mode === 'reset' && 'Enter your email to receive password reset instructions.'}
             </p>
           </div>
 
           {/* Configuration Missing Notice */}
           {!isConfigured && (
-            <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-800/80 text-amber-200 text-xs flex items-start gap-3 shadow-xs">
+            <div className="p-3 rounded-xl bg-amber-950/30 border border-amber-900/60 text-amber-200 text-xs flex items-start gap-2.5 shadow-xs">
               <Server className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-              <div className="flex-1 space-y-1.5">
-                <div className="font-semibold text-amber-300">Firebase Configuration Pending</div>
-                <div className="text-amber-200/80 leading-relaxed text-[11px]">
-                  Firebase keys have not been added to environment variables yet. You can paste them in the deployment settings or continue in demo mode.
+              <div className="flex-1 space-y-1 text-[11px]">
+                <div className="font-semibold text-amber-300">Firebase Keys Pending</div>
+                <div className="text-amber-200/80 leading-relaxed">
+                  Enter your credentials in deployment settings or launch in offline mode.
                 </div>
-                <div className="flex items-center gap-2 pt-1">
+                <div className="flex items-center gap-2 pt-0.5">
                   <button
                     onClick={() => setShowConfigModal(true)}
-                    className="text-[11px] font-semibold text-amber-300 underline underline-offset-2 hover:text-white"
+                    className="font-medium text-amber-300 underline underline-offset-2 hover:text-white cursor-pointer"
                   >
-                    Setup Firebase Keys
+                    Configure
                   </button>
-                  <span className="text-amber-600">•</span>
+                  <span className="text-amber-700">•</span>
                   <button
                     onClick={signInAsDemoUser}
-                    className="text-[11px] font-semibold text-amber-300 underline underline-offset-2 hover:text-white"
+                    className="font-medium text-amber-300 underline underline-offset-2 hover:text-white cursor-pointer"
                   >
-                    Local Demo Bypass
+                    Offline Mode
                   </button>
                 </div>
               </div>
@@ -183,14 +182,14 @@ export const LoginPage: React.FC = () => {
           )}
 
           {/* Main Form Container */}
-          <Card className="bg-slate-900/90 border-slate-800 shadow-xl rounded-2xl overflow-hidden backdrop-blur-md">
-            <CardContent className="p-6 space-y-4">
+          <Card className="bg-slate-900/80 border-slate-800 shadow-xl rounded-2xl overflow-hidden backdrop-blur-md">
+            <CardContent className="p-5 sm:p-6 space-y-4">
               {/* Error Alert */}
               {error && (
-                <div className="p-3 rounded-xl bg-rose-950/50 border border-rose-800 text-rose-300 text-xs flex items-start gap-2.5 animate-in fade-in">
+                <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-900/60 text-rose-300 text-xs flex items-start gap-2.5">
                   <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                   <div className="flex-1 leading-relaxed text-[11px]">{error}</div>
-                  <button onClick={clearError} className="text-rose-400 hover:text-rose-200">
+                  <button onClick={clearError} className="text-rose-400 hover:text-rose-200 cursor-pointer">
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -198,21 +197,21 @@ export const LoginPage: React.FC = () => {
 
               {/* Password Reset Success Alert */}
               {resetSent && (
-                <div className="p-3 rounded-xl bg-emerald-950/50 border border-emerald-800 text-emerald-300 text-xs flex items-center gap-2.5">
+                <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-900/60 text-emerald-300 text-xs flex items-center gap-2.5">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span className="text-[11px]">Password reset email sent! Please check your inbox.</span>
+                  <span className="text-[11px]">Password reset email sent! Check your inbox.</span>
                 </div>
               )}
 
-              {/* Google Sign In Button */}
-              {mode !== 'reset' && (
-                <>
+              {mode === 'signin' ? (
+                <div className="space-y-3">
+                  {/* Primary 1-Click Google Sign In */}
                   <Button
                     type="button"
                     onClick={handleGoogleSignIn}
                     disabled={loading || !isConfigured}
                     variant="outline"
-                    className="w-full h-11 bg-slate-950 hover:bg-slate-800 text-slate-200 border-slate-700/80 font-medium text-xs flex items-center justify-center gap-2.5 rounded-xl shadow-2xs transition-colors"
+                    className="w-full h-11 bg-slate-950 hover:bg-slate-800/90 text-slate-200 hover:text-white border-slate-700/80 font-medium text-xs flex items-center justify-center gap-2.5 rounded-xl transition-all cursor-pointer shadow-xs"
                   >
                     <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
                       <path
@@ -232,153 +231,185 @@ export const LoginPage: React.FC = () => {
                         d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
                       />
                     </svg>
-                    <span>{loading ? 'Authenticating...' : 'Continue with Google'}</span>
+                    <span>{loading ? 'Signing in...' : 'Continue with Google'}</span>
                   </Button>
 
-                  <div className="relative flex items-center justify-center my-2">
-                    <div className="border-t border-slate-800 w-full" />
-                    <span className="bg-slate-900 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-500 absolute">
-                      Or with email
+                  {/* Expandable Email/Password Toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setIsEmailExpanded(!isEmailExpanded)}
+                    className="w-full py-2.5 px-3 rounded-xl border border-slate-800 hover:border-slate-700 bg-slate-950/50 hover:bg-slate-900/70 text-xs font-medium text-slate-400 hover:text-slate-200 transition-all flex items-center justify-between group cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Mail className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 transition-colors" />
+                      <span>{isEmailExpanded ? 'Hide email options' : 'Sign in with email & password'}</span>
                     </span>
-                  </div>
-                </>
-              )}
-
-              {/* Email Form */}
-              <form onSubmit={handleEmailSubmit} className="space-y-3.5">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">Email Address</label>
-                  <div className="relative">
-                    <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-3 pointer-events-none" />
-                    <Input
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="name@example.com"
-                      className="pl-9 bg-slate-950 border-slate-800 text-xs text-slate-100 placeholder:text-slate-600 focus:border-blue-500 h-10 rounded-xl"
+                    <ChevronDown
+                      className={cn(
+                        'w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 transition-transform duration-200',
+                        isEmailExpanded && 'rotate-180'
+                      )}
                     />
-                  </div>
-                </div>
+                  </button>
 
-                {mode !== 'reset' && (
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="text-xs font-semibold text-slate-300">Password</label>
-                      {mode === 'signin' && (
+                  {/* Expandable Form Body */}
+                  <div
+                    className={cn(
+                      'transition-all duration-300 ease-in-out overflow-hidden',
+                      isEmailExpanded ? 'max-h-[500px] opacity-100 pt-1' : 'max-h-0 opacity-0 pointer-events-none'
+                    )}
+                  >
+                    <form onSubmit={handleEmailSubmit} className="space-y-3 pt-2">
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-400 mb-1">Email address</label>
+                        <div className="relative">
+                          <Mail className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3 pointer-events-none" />
+                          <Input
+                            type="email"
+                            required
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            placeholder="admin@example.com"
+                            className="pl-8.5 bg-slate-950 border-slate-800 text-xs text-slate-100 placeholder:text-slate-600 focus:border-blue-500 h-9 rounded-xl"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[11px] font-medium text-slate-400">Password</label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              clearError();
+                              setMode('reset');
+                            }}
+                            className="text-[11px] text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+                          >
+                            Forgot password?
+                          </button>
+                        </div>
+                        <div className="relative">
+                          <KeyRound className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3 pointer-events-none" />
+                          <Input
+                            type="password"
+                            required
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder="••••••••••••"
+                            className="pl-8.5 bg-slate-950 border-slate-800 text-xs text-slate-100 placeholder:text-slate-600 focus:border-blue-500 h-9 rounded-xl"
+                          />
+                        </div>
+                      </div>
+
+                      <Button
+                        type="submit"
+                        disabled={loading || !isConfigured}
+                        className="w-full h-9 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-xl shadow-xs transition-colors cursor-pointer mt-1"
+                      >
+                        {loading ? 'Verifying...' : 'Sign In'}
+                      </Button>
+
+                      <div className="text-center pt-1.5 text-xs text-slate-400">
+                        Don't have an account?{' '}
                         <button
                           type="button"
                           onClick={() => {
                             clearError();
-                            setMode('reset');
+                            setMode('signup');
                           }}
-                          className="text-[11px] text-blue-400 hover:text-blue-300 transition-colors"
+                          className="font-medium text-blue-400 hover:text-blue-300 cursor-pointer"
                         >
-                          Forgot password?
+                          Sign up
                         </button>
-                      )}
-                    </div>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              ) : (
+                /* Sign Up or Reset Password Mode */
+                <form onSubmit={handleEmailSubmit} className="space-y-3.5">
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-400 mb-1">Email address</label>
                     <div className="relative">
-                      <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-3 pointer-events-none" />
+                      <Mail className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3 pointer-events-none" />
                       <Input
-                        type="password"
+                        type="email"
                         required
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder="••••••••••••"
-                        className="pl-9 bg-slate-950 border-slate-800 text-xs text-slate-100 placeholder:text-slate-600 focus:border-blue-500 h-10 rounded-xl"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="name@example.com"
+                        className="pl-8.5 bg-slate-950 border-slate-800 text-xs text-slate-100 placeholder:text-slate-600 focus:border-blue-500 h-9 rounded-xl"
                       />
                     </div>
                   </div>
-                )}
 
-                <Button
-                  type="submit"
-                  disabled={loading || (!isConfigured && mode !== 'reset')}
-                  className="w-full h-10 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs rounded-xl shadow-xs transition-colors mt-2"
-                >
-                  {loading ? (
-                    'Processing...'
-                  ) : mode === 'signin' ? (
-                    'Sign In'
-                  ) : mode === 'signup' ? (
-                    'Create Account'
-                  ) : (
-                    'Send Reset Link'
+                  {mode === 'signup' && (
+                    <div>
+                      <label className="block text-[11px] font-medium text-slate-400 mb-1">Create password</label>
+                      <div className="relative">
+                        <KeyRound className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3 pointer-events-none" />
+                        <Input
+                          type="password"
+                          required
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          placeholder="Minimum 6 characters"
+                          className="pl-8.5 bg-slate-950 border-slate-800 text-xs text-slate-100 placeholder:text-slate-600 focus:border-blue-500 h-9 rounded-xl"
+                        />
+                      </div>
+                    </div>
                   )}
-                </Button>
-              </form>
 
-              {/* Mode Toggle Link */}
-              <div className="text-center pt-2 text-xs text-slate-400 border-t border-slate-800/80">
-                {mode === 'signin' && (
-                  <p>
-                    Don't have an account?{' '}
-                    <button
-                      onClick={() => {
-                        clearError();
-                        setMode('signup');
-                      }}
-                      className="font-semibold text-blue-400 hover:text-blue-300"
-                    >
-                      Sign up
-                    </button>
-                  </p>
-                )}
+                  <Button
+                    type="submit"
+                    disabled={loading || (!isConfigured && mode !== 'reset')}
+                    className="w-full h-9 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                  >
+                    {loading
+                      ? 'Processing...'
+                      : mode === 'signup'
+                      ? 'Create Account'
+                      : 'Send Reset Link'}
+                  </Button>
 
-                {mode === 'signup' && (
-                  <p>
-                    Already have an account?{' '}
+                  <div className="text-center pt-2 text-xs text-slate-400 border-t border-slate-800/80">
                     <button
+                      type="button"
                       onClick={() => {
                         clearError();
                         setMode('signin');
                       }}
-                      className="font-semibold text-blue-400 hover:text-blue-300"
+                      className="font-medium text-blue-400 hover:text-blue-300 cursor-pointer"
                     >
-                      Sign in
+                      ← Back to sign in
                     </button>
-                  </p>
-                )}
-
-                {mode === 'reset' && (
-                  <p>
-                    Remembered your password?{' '}
-                    <button
-                      onClick={() => {
-                        clearError();
-                        setMode('signin');
-                      }}
-                      className="font-semibold text-blue-400 hover:text-blue-300"
-                    >
-                      Back to sign in
-                    </button>
-                  </p>
-                )}
-              </div>
+                  </div>
+                </form>
+              )}
             </CardContent>
           </Card>
 
-          {/* Quick Demo Bypass Option */}
-          <div className="text-center space-y-2">
+          {/* Offline / Local Demo Access */}
+          <div className="text-center pt-1">
             <button
               onClick={signInAsDemoUser}
-              className="text-xs text-slate-400 hover:text-slate-200 inline-flex items-center gap-1.5 transition-colors"
+              className="text-xs text-slate-500 hover:text-slate-300 inline-flex items-center gap-1.5 transition-colors cursor-pointer"
             >
-              <span>Continue in Local Offline / Demo Mode</span>
-              <ArrowRight className="w-3.5 h-3.5" />
+              <span>Offline / Local Workspace Access</span>
+              <ArrowRight className="w-3 h-3" />
             </button>
           </div>
         </div>
       </main>
 
-      {/* Footer Info */}
-      <footer className="border-t border-slate-800/80 bg-slate-900/40 px-6 py-4 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-2">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span>Non-GST Entity (Udyam Verified: UDYAM-JH-06-0090498)</span>
+      {/* Clean Minimal Footer */}
+      <footer className="border-t border-slate-800/60 bg-slate-900/20 px-6 py-3 flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-500 gap-1.5">
+        <div className="flex items-center gap-1.5">
+          <ShieldCheck className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+          <span>Udyam Registered Micro-Enterprise (UDYAM-JH-06-0090498)</span>
         </div>
-        <div>Suren Hembram • Chakulia, Jharkhand 832301</div>
+        <div>Suren Hembram • Chakulia, Jharkhand</div>
       </footer>
 
       {/* Deployment & Firebase Credentials Modal */}

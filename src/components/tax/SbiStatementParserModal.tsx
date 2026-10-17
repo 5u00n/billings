@@ -101,24 +101,33 @@ export const SbiStatementParserModal: React.FC<SbiStatementParserModalProps> = (
           creditStr = cols[4] || '';
         }
 
-        // Normalize Date to YYYY-MM-DD
+        // Normalize Date to YYYY-MM-DD with strict validation
         let formattedDate = new Date().toISOString().slice(0, 10);
         if (rawDate) {
           const parts = rawDate.split(/[-/]/);
           if (parts.length === 3) {
-            if (parts[2].length === 4) {
+            const p0 = parts[0].trim();
+            const p1 = parts[1].trim();
+            const p2 = parts[2].trim();
+            if (p2.length === 4 && !isNaN(Number(p2))) {
               // DD/MM/YYYY
-              formattedDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-            } else if (parts[0].length === 4) {
+              formattedDate = `${p2}-${p1.padStart(2, '0')}-${p0.padStart(2, '0')}`;
+            } else if (p0.length === 4 && !isNaN(Number(p0))) {
               // YYYY-MM-DD
-              formattedDate = `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+              formattedDate = `${p0}-${p1.padStart(2, '0')}-${p2.padStart(2, '0')}`;
             }
           }
         }
+        if (isNaN(Date.parse(formattedDate))) {
+          formattedDate = new Date().toISOString().slice(0, 10);
+        }
 
-        const debit = parseFloat(debitStr.replace(/,/g, '')) || 0;
-        const credit = parseFloat(creditStr.replace(/,/g, '')) || 0;
-        const balance = balanceStr ? parseFloat(balanceStr.replace(/,/g, '')) : undefined;
+        const debitRaw = parseFloat(debitStr.replace(/,/g, ''));
+        const debit = isNaN(debitRaw) ? 0 : Math.max(0, debitRaw);
+        const creditRaw = parseFloat(creditStr.replace(/,/g, ''));
+        const credit = isNaN(creditRaw) ? 0 : Math.max(0, creditRaw);
+        const balanceRaw = balanceStr ? parseFloat(balanceStr.replace(/,/g, '')) : undefined;
+        const balance = balanceRaw !== undefined && !isNaN(balanceRaw) ? balanceRaw : undefined;
 
         if (debit <= 0 && credit <= 0) continue;
 

@@ -9,6 +9,7 @@
     "dev:client": "vite",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "build": "vite build",
+    "deploy": "npm run build && wrangler deploy",
     "start": "tsx server/index.ts"
   },
   "keywords": [],
@@ -44,6 +45,7 @@
     "concurrently": "^10.0.6",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vite": "^8.3.4"
+    "vite": "^8.3.4",
+    "wrangler": "^4.151.1"
   }
 }

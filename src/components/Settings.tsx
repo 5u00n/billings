@@ -24,15 +24,22 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSaveSettings, on
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    const inputEl = e.target;
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
       alert('Logo file size must be less than 2MB.');
+      inputEl.value = '';
       return;
     }
     const reader = new FileReader();
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string;
       handleProfileChange('logoUrl', dataUrl);
+      inputEl.value = '';
+    };
+    reader.onerror = () => {
+      alert('Could not read logo image. Please ensure the file is not locked by another app or an offloaded iCloud file.');
+      inputEl.value = '';
     };
     reader.readAsDataURL(file);
   };
@@ -43,15 +50,22 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSaveSettings, on
 
   const handleQrUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    const inputEl = e.target;
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
       alert('QR code image size must be less than 2MB.');
+      inputEl.value = '';
       return;
     }
     const reader = new FileReader();
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string;
       handleProfileChange('customQrUrl', dataUrl);
+      inputEl.value = '';
+    };
+    reader.onerror = () => {
+      alert('Could not read QR code image. Please ensure the file is not locked by another app or an offloaded iCloud file.');
+      inputEl.value = '';
     };
     reader.readAsDataURL(file);
   };
@@ -82,10 +96,11 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSaveSettings, on
 
   const handleRestoreFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    const inputEl = e.target;
     if (!file) return;
 
     if (!confirm('Restoring will replace current records. Are you sure?')) {
-      e.target.value = '';
+      inputEl.value = '';
       return;
     }
 
@@ -104,9 +119,14 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSaveSettings, on
         alert('Failed to restore database');
       }
     } catch (err: any) {
-      alert(`Error restoring backup: ${err.message}`);
+      if (err.name === 'NotReadableError') {
+        alert('Error reading backup file: The file could not be read due to file permissions or a file lock. Please ensure the file is closed in other editors, or downloaded locally from iCloud Drive/OneDrive, and try again.');
+      } else {
+        alert(`Error restoring backup: ${err.message || 'Unknown error'}`);
+      }
+    } finally {
+      inputEl.value = '';
     }
-    e.target.value = '';
   };
 
   return (

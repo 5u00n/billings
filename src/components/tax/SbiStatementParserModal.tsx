@@ -41,6 +41,7 @@ export const SbiStatementParserModal: React.FC<SbiStatementParserModalProps> = (
   const [isParsing, setIsParsing] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -214,18 +215,35 @@ export const SbiStatementParserModal: React.FC<SbiStatementParserModalProps> = (
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    const inputEl = e.target;
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const content = evt.target?.result as string;
-      if (content) {
-        setRawText(content);
-        parseCsvText(content);
+
+    setUploadError(null);
+    setIsParsing(true);
+
+    try {
+      const content = await file.text();
+      if (!content || !content.trim()) {
+        throw new Error('The selected file is empty.');
       }
-    };
-    reader.readAsText(file);
+      setRawText(content);
+      parseCsvText(content);
+    } catch (err: any) {
+      console.error('File reading error:', err);
+      if (err.name === 'NotReadableError') {
+        setUploadError(
+          'File permission / lock error: The file is likely open and locked in Microsoft Excel or Apple Numbers, or is an offloaded iCloud Drive file. Please close Excel/Numbers or download the file locally in Finder, then try again. You can also paste the CSV text directly into the box below.'
+        );
+      } else {
+        setUploadError("Failed to read file: " + (err.message || "Unknown error"));
+      }
+    } finally {
+      setIsParsing(false);
+      // Reset input value so selecting the same file triggers onChange
+      inputEl.value = '';
+    }
   };
 
   const updateRowClassification = (id: string, classification: TaxClassification) => {
@@ -391,6 +409,24 @@ export const SbiStatementParserModal: React.FC<SbiStatementParserModalProps> = (
                   rows={8}
                   className="w-full p-3 font-mono text-xs rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
                 />
+                {uploadError && (
+                  <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs flex items-start gap-2.5 mt-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+                    <div className="space-y-1 flex-1">
+                      <p className="font-semibold">{uploadError}</p>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                        💡 <strong>Quick Fix:</strong> Close Excel/Numbers if the file is currently open, or open the CSV in a text editor (like TextEdit/VS Code), copy all lines, and paste them into the box above.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setUploadError(null)}
+                      className="text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end gap-3 pt-2">

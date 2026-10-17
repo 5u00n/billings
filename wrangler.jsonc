@@ -1,22 +1,33 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "suren-billings",
-  "main": "server/worker.ts",
-  "compatibility_date": "2024-11-01",
-  "compatibility_flags": ["nodejs_compat"],
-  "assets": {
-    "directory": "./dist",
-    "not_found_handling": "single-page-application",
-    "binding": "ASSETS"
-  },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "billings-db",
-      "database_id": "billings-db"
-    }
-  ],
-  "vars": {
-    "BACKEND_URL": ""
-  }
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "suren-billings",
+	"main": "server/worker.ts",
+	"compatibility_date": "2024-11-01",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"assets": {
+		"directory": "./dist",
+		"not_found_handling": "single-page-application",
+		"binding": "ASSETS"
+	},
+	// Uncomment and paste your D1 Database ID UUID once created in Cloudflare Dashboard:
+	// "d1_databases": [
+	//   {
+	//     "binding": "DB",
+	//     "database_name": "billings-db",
+	//     "database_id": "<YOUR_COPIED_D1_DATABASE_UUID_HERE>"
+	//   }
+	// ],
+	"vars": {
+		"BACKEND_URL": ""
+	},
+	"d1_databases": [
+		{
+			"binding": "billings_db",
+			"database_name": "billings-db",
+			"database_id": "2a1acdac-b712-42de-b1b8-7f68ca6f6043",
+			"remote": true
+		}
+	]
 }

@@ -1,20 +1,12 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
-  getActiveFirebaseConfig,
-  saveCustomFirebaseConfig,
-  clearCustomFirebaseConfig,
-  FirebaseConfig,
-} from '../../lib/firebase';
-import {
   Lock,
   Mail,
   KeyRound,
   ShieldCheck,
   AlertCircle,
   CheckCircle2,
-  Settings,
-  ArrowRight,
   Server,
   X,
   ChevronDown,
@@ -32,7 +24,6 @@ export const LoginPage: React.FC = () => {
     signInWithEmail,
     signUpWithEmail,
     sendPasswordReset,
-    signInAsDemoUser,
     clearError,
   } = useAuth();
 
@@ -41,27 +32,7 @@ export const LoginPage: React.FC = () => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [resetSent, setResetSent] = useState(false);
-  const [showConfigModal, setShowConfigModal] = useState(false);
   const [isEmailExpanded, setIsEmailExpanded] = useState(false);
-
-  // Config modal state
-  const currentConfig = getActiveFirebaseConfig() || {};
-  const [configForm, setConfigForm] = useState<FirebaseConfig>({
-    apiKey: currentConfig.apiKey || '',
-    authDomain: currentConfig.authDomain || '',
-    projectId: currentConfig.projectId || '',
-    storageBucket: currentConfig.storageBucket || '',
-    messagingSenderId: currentConfig.messagingSenderId || '',
-    appId: currentConfig.appId || '',
-  });
-
-  const [allowedEmailsInput, setAllowedEmailsInput] = useState(() => {
-    try {
-      return localStorage.getItem('billings_allowed_emails') || 'surenhembram97@gmail.com, me.ben007@gmail.com';
-    } catch {
-      return 'surenhembram97@gmail.com, me.ben007@gmail.com';
-    }
-  });
 
   const handleGoogleSignIn = async () => {
     setLoading(true);
@@ -97,18 +68,6 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  const handleSaveConfig = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!configForm.apiKey || !configForm.projectId) {
-      alert('API Key and Project ID are required.');
-      return;
-    }
-    try {
-      localStorage.setItem('billings_allowed_emails', allowedEmailsInput);
-    } catch {}
-    saveCustomFirebaseConfig(configForm);
-  };
-
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between font-sans selection:bg-blue-600 selection:text-white">
       {/* Top Header */}
@@ -125,14 +84,7 @@ export const LoginPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          <span className="text-[11px] text-slate-500 hidden sm:inline font-mono">Chakulia, IN</span>
-          <button
-            onClick={() => setShowConfigModal(true)}
-            title="Firebase Deployment Settings"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 transition-colors cursor-pointer"
-          >
-            <Settings className="w-4 h-4" />
-          </button>
+          <span className="text-[11px] text-slate-500 font-mono">Chakulia, IN</span>
         </div>
       </header>
 
@@ -158,24 +110,9 @@ export const LoginPage: React.FC = () => {
             <div className="p-3 rounded-xl bg-amber-950/30 border border-amber-900/60 text-amber-200 text-xs flex items-start gap-2.5 shadow-xs">
               <Server className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <div className="flex-1 space-y-1 text-[11px]">
-                <div className="font-semibold text-amber-300">Firebase Keys Pending</div>
+                <div className="font-semibold text-amber-300">Authentication Service Offline</div>
                 <div className="text-amber-200/80 leading-relaxed">
-                  Enter your credentials in deployment settings or launch in offline mode.
-                </div>
-                <div className="flex items-center gap-2 pt-0.5">
-                  <button
-                    onClick={() => setShowConfigModal(true)}
-                    className="font-medium text-amber-300 underline underline-offset-2 hover:text-white cursor-pointer"
-                  >
-                    Configure
-                  </button>
-                  <span className="text-amber-700">•</span>
-                  <button
-                    onClick={signInAsDemoUser}
-                    className="font-medium text-amber-300 underline underline-offset-2 hover:text-white cursor-pointer"
-                  >
-                    Offline Mode
-                  </button>
+                  Authentication service is not configured with environment credentials.
                 </div>
               </div>
             </div>
@@ -348,13 +285,14 @@ export const LoginPage: React.FC = () => {
                     <div>
                       <label className="block text-[11px] font-medium text-slate-400 mb-1">Create password</label>
                       <div className="relative">
-                        <KeyRound className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3 pointer-events-none" />
+                        <Lock className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3 pointer-events-none" />
                         <Input
                           type="password"
                           required
+                          minLength={6}
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
-                          placeholder="Minimum 6 characters"
+                          placeholder="Min 6 characters"
                           className="pl-8.5 bg-slate-950 border-slate-800 text-xs text-slate-100 placeholder:text-slate-600 focus:border-blue-500 h-9 rounded-xl"
                         />
                       </div>
@@ -363,24 +301,24 @@ export const LoginPage: React.FC = () => {
 
                   <Button
                     type="submit"
-                    disabled={loading || (!isConfigured && mode !== 'reset')}
-                    className="w-full h-9 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                    disabled={loading || !isConfigured}
+                    className="w-full h-10 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
                   >
                     {loading
                       ? 'Processing...'
                       : mode === 'signup'
-                      ? 'Create Account'
+                      ? 'Register Account'
                       : 'Send Reset Link'}
                   </Button>
 
-                  <div className="text-center pt-2 text-xs text-slate-400 border-t border-slate-800/80">
+                  <div className="text-center pt-2">
                     <button
                       type="button"
                       onClick={() => {
                         clearError();
                         setMode('signin');
                       }}
-                      className="font-medium text-blue-400 hover:text-blue-300 cursor-pointer"
+                      className="font-medium text-blue-400 hover:text-blue-300 cursor-pointer text-xs"
                     >
                       ← Back to sign in
                     </button>
@@ -389,17 +327,6 @@ export const LoginPage: React.FC = () => {
               )}
             </CardContent>
           </Card>
-
-          {/* Offline / Local Demo Access */}
-          <div className="text-center pt-1">
-            <button
-              onClick={signInAsDemoUser}
-              className="text-xs text-slate-500 hover:text-slate-300 inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <span>Offline / Local Workspace Access</span>
-              <ArrowRight className="w-3 h-3" />
-            </button>
-          </div>
         </div>
       </main>
 
@@ -411,138 +338,6 @@ export const LoginPage: React.FC = () => {
         </div>
         <div>Suren Hembram • Chakulia, Jharkhand</div>
       </footer>
-
-      {/* Deployment & Firebase Credentials Modal */}
-      {showConfigModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-6 space-y-5 shadow-2xl animate-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Settings className="w-4 h-4 text-blue-400" />
-                <h3 className="font-bold text-sm text-white">Firebase Deployment Settings</h3>
-              </div>
-              <button
-                onClick={() => setShowConfigModal(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-300 leading-relaxed">
-              When hosting this suite anywhere (Vercel, Render, Railway, VPS, Cloud Run), enter your Firebase Web App credentials below. They are securely saved for your deployment.
-            </p>
-
-            <form onSubmit={handleSaveConfig} className="space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">API Key *</label>
-                  <Input
-                    required
-                    value={configForm.apiKey}
-                    onChange={(e) => setConfigForm({ ...configForm, apiKey: e.target.value })}
-                    placeholder="AIzaSy..."
-                    className="bg-slate-950 border-slate-800 text-xs font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">Project ID *</label>
-                  <Input
-                    required
-                    value={configForm.projectId}
-                    onChange={(e) => setConfigForm({ ...configForm, projectId: e.target.value })}
-                    placeholder="my-billing-suite"
-                    className="bg-slate-950 border-slate-800 text-xs font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">Auth Domain</label>
-                  <Input
-                    value={configForm.authDomain}
-                    onChange={(e) => setConfigForm({ ...configForm, authDomain: e.target.value })}
-                    placeholder="my-billing-suite.firebaseapp.com"
-                    className="bg-slate-950 border-slate-800 text-xs font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">App ID</label>
-                  <Input
-                    value={configForm.appId}
-                    onChange={(e) => setConfigForm({ ...configForm, appId: e.target.value })}
-                    placeholder="1:123456789:web:abcdef"
-                    className="bg-slate-950 border-slate-800 text-xs font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">Storage Bucket</label>
-                  <Input
-                    value={configForm.storageBucket}
-                    onChange={(e) => setConfigForm({ ...configForm, storageBucket: e.target.value })}
-                    placeholder="my-billing-suite.firebasestorage.app"
-                    className="bg-slate-950 border-slate-800 text-xs font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">Messaging Sender ID</label>
-                  <Input
-                    value={configForm.messagingSenderId}
-                    onChange={(e) => setConfigForm({ ...configForm, messagingSenderId: e.target.value })}
-                    placeholder="123456789"
-                    className="bg-slate-950 border-slate-800 text-xs font-mono"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1 font-semibold text-xs">
-                  Allowed Administrator Emails (comma-separated)
-                </label>
-                <Input
-                  value={allowedEmailsInput}
-                  onChange={(e) => setAllowedEmailsInput(e.target.value)}
-                  placeholder="surenhembram97@gmail.com, me.ben007@gmail.com"
-                  className="bg-slate-950 border-slate-800 text-xs font-mono"
-                />
-                <p className="text-[10px] text-slate-500 mt-1">
-                  Leave empty to allow all registered users, or enter specific emails allowed to access your suite.
-                </p>
-              </div>
-
-              <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={clearCustomFirebaseConfig}
-                  className="text-xs text-rose-400 hover:text-rose-300 underline"
-                >
-                  Reset to Environment Variables
-                </button>
-
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setShowConfigModal(false)}
-                    className="bg-slate-800 hover:bg-slate-700 text-white border-slate-700 text-xs"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs"
-                  >
-                    Save & Activate
-                  </Button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

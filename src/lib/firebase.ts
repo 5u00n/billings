@@ -11,21 +11,7 @@ export interface FirebaseConfig {
   measurementId?: string;
 }
 
-const STORAGE_KEY = 'billings_firebase_config';
-
 export function getActiveFirebaseConfig(): FirebaseConfig | null {
-  // 1. Check runtime localStorage override
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed.apiKey && parsed.projectId) {
-        return parsed;
-      }
-    }
-  } catch {}
-
-  // 2. Check Vite environment variables
   const envConfig: FirebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
     authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -41,24 +27,6 @@ export function getActiveFirebaseConfig(): FirebaseConfig | null {
   }
 
   return null;
-}
-
-export function saveCustomFirebaseConfig(config: FirebaseConfig): boolean {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-    window.location.reload();
-    return true;
-  } catch (err) {
-    console.error('Failed to save Firebase configuration:', err);
-    return false;
-  }
-}
-
-export function clearCustomFirebaseConfig() {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-    window.location.reload();
-  } catch {}
 }
 
 let app: FirebaseApp | null = null;

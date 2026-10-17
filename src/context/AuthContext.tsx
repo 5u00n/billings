@@ -15,7 +15,6 @@ export interface AuthUser {
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
-  isDemoUser?: boolean;
 }
 
 interface AuthContextType {
@@ -28,13 +27,10 @@ interface AuthContextType {
   signInWithEmail: (email: string, pass: string) => Promise<void>;
   signUpWithEmail: (email: string, pass: string) => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
-  signInAsDemoUser: () => void;
   signOutUser: () => Promise<void>;
   getIdToken: () => Promise<string | null>;
   clearError: () => void;
 }
-
-const DEMO_USER_STORAGE_KEY = 'billings_demo_user_session';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -58,7 +54,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
-    // 1. Check if Firebase is active
+    // Check if Firebase is active
     if (auth && isFirebaseConfigured) {
       const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
         if (fbUser) {
@@ -74,44 +70,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               email: fbUser.email,
               displayName: fbUser.displayName || fbUser.email?.split('@')[0] || 'Administrator',
               photoURL: fbUser.photoURL,
-              isDemoUser: false,
             });
             setError(null);
           }
         } else {
           setFirebaseUser(null);
-          // Check if local demo session was active
-          checkDemoSession();
+          setUser(null);
         }
         setLoading(false);
       });
 
       return () => unsubscribe();
     } else {
-      // Firebase not configured yet, check for demo session
-      checkDemoSession();
+      setUser(null);
+      setFirebaseUser(null);
       setLoading(false);
     }
   }, []);
-
-  const checkDemoSession = () => {
-    try {
-      const demoSession = localStorage.getItem(DEMO_USER_STORAGE_KEY);
-      if (demoSession === 'true') {
-        setUser({
-          uid: 'demo-local-admin',
-          email: 'local-owner@suren.finance',
-          displayName: 'Local Workspace Owner',
-          photoURL: null,
-          isDemoUser: true,
-        });
-      } else {
-        setUser(null);
-      }
-    } catch {
-      setUser(null);
-    }
-  };
 
   const signInWithGoogle = async () => {
     if (!auth) throw new Error('Firebase Authentication is not configured yet.');
@@ -188,20 +163,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signInAsDemoUser = () => {
-    localStorage.setItem(DEMO_USER_STORAGE_KEY, 'true');
-    setUser({
-      uid: 'demo-local-admin',
-      email: 'local-owner@suren.finance',
-      displayName: 'Local Workspace Owner',
-      photoURL: null,
-      isDemoUser: true,
-    });
-    setError(null);
-  };
-
   const signOutUser = async () => {
-    localStorage.removeItem(DEMO_USER_STORAGE_KEY);
     if (auth && firebaseUser) {
       await signOut(auth);
     }
@@ -230,7 +192,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signInWithEmail,
         signUpWithEmail,
         sendPasswordReset,
-        signInAsDemoUser,
         signOutUser,
         getIdToken,
         clearError,

@@ -167,21 +167,38 @@ app.post('/api/invoices', (req: Request, res: Response) => {
       body.hide_qty ? 1 : 0
     );
 
-    // Update numbering setting if it matches the current sequence
+    // Update numbering setting if it matches the current sequence or prefix
     const numberingRow: any = db.prepare('SELECT value_json FROM settings WHERE key = ?').get('numbering');
     if (numberingRow) {
       const numbering = JSON.parse(numberingRow.value_json);
-      const match = body.invoice_number.match(/\d+$/);
+      const invNum = (body.invoice_number || '').trim();
+      const match = invNum.match(/\d+$/);
       if (match) {
         const num = parseInt(match[0], 10);
-        if (body.doc_type === 'BILL OF SUPPLY' && num >= numbering.nextNumberBOS) {
-          numbering.nextNumberBOS = num + 1;
-        } else if (body.doc_type === 'INVOICE' && num >= numbering.nextNumberINV) {
-          numbering.nextNumberINV = num + 1;
-        } else if ((body.doc_type === 'ESTIMATE' || body.doc_type === 'PROFORMA') && num >= numbering.nextNumberEST) {
-          numbering.nextNumberEST = num + 1;
-        } else if (body.doc_type === 'RECEIPT' && num >= numbering.nextNumberREC) {
-          numbering.nextNumberREC = num + 1;
+        if (
+          (numbering.billOfSupplyPrefix && invNum.startsWith(numbering.billOfSupplyPrefix)) ||
+          body.doc_type === 'BILL OF SUPPLY'
+        ) {
+          numbering.nextNumberBOS = Math.max(numbering.nextNumberBOS || 1, num + 1);
+        }
+        if (
+          (numbering.invoicePrefix && invNum.startsWith(numbering.invoicePrefix)) ||
+          body.doc_type === 'INVOICE'
+        ) {
+          numbering.nextNumberINV = Math.max(numbering.nextNumberINV || 1, num + 1);
+        }
+        if (
+          (numbering.estimatePrefix && invNum.startsWith(numbering.estimatePrefix)) ||
+          body.doc_type === 'ESTIMATE' ||
+          body.doc_type === 'PROFORMA'
+        ) {
+          numbering.nextNumberEST = Math.max(numbering.nextNumberEST || 1, num + 1);
+        }
+        if (
+          (numbering.receiptPrefix && invNum.startsWith(numbering.receiptPrefix)) ||
+          body.doc_type === 'RECEIPT'
+        ) {
+          numbering.nextNumberREC = Math.max(numbering.nextNumberREC || 1, num + 1);
         }
         db.prepare('UPDATE settings SET value_json = ? WHERE key = ?').run(JSON.stringify(numbering), 'numbering');
       }
@@ -436,7 +453,32 @@ app.get('/api/next-number', (req: Request, res: Response) => {
     seq = numbering.nextNumberREC || 1;
   }
 
-  // Format with 6 digits padding like INV-000001
+  // Scan existing invoices in the database to guarantee seq is strictly greater than any existing invoice
+  const existingInvoices = db.prepare('SELECT invoice_number, doc_type FROM invoices').all() as {
+    invoice_number: string;
+    doc_type: string;
+  }[];
+
+  let maxNumInDb = 0;
+  for (const inv of existingInvoices) {
+    const invNum = inv.invoice_number || '';
+    const numMatch = invNum.match(/\d+$/);
+    if (numMatch) {
+      const n = parseInt(numMatch[0], 10);
+      // If invoice has matching prefix or matching docType
+      if (invNum.startsWith(prefix) || inv.doc_type === docType) {
+        if (n > maxNumInDb) {
+          maxNumInDb = n;
+        }
+      }
+    }
+  }
+
+  if (maxNumInDb >= seq) {
+    seq = maxNumInDb + 1;
+  }
+
+  // Format with 6 digits padding like INV-000001 or BOS-000001
   const formatted = `${prefix}${String(seq).padStart(6, '0')}`;
   res.json({ nextNumber: formatted, prefix, sequence: seq });
 });
@@ -620,14 +662,43 @@ function generateNextInvoiceNumberInternal(docType: string): string {
   if (docType === 'INVOICE') {
     prefix = numbering.invoicePrefix || 'INV-';
     seq = numbering.nextNumberINV || 1;
-    numbering.nextNumberINV = seq + 1;
   } else if (docType === 'ESTIMATE' || docType === 'PROFORMA') {
     prefix = numbering.estimatePrefix || 'EST-';
     seq = numbering.nextNumberEST || 1;
-    numbering.nextNumberEST = seq + 1;
   } else if (docType === 'RECEIPT') {
     prefix = numbering.receiptPrefix || 'REC-';
     seq = numbering.nextNumberREC || 1;
+  }
+
+  // Scan existing invoices in the database
+  const existingInvoices = db.prepare('SELECT invoice_number, doc_type FROM invoices').all() as {
+    invoice_number: string;
+    doc_type: string;
+  }[];
+
+  let maxNumInDb = 0;
+  for (const inv of existingInvoices) {
+    const invNum = inv.invoice_number || '';
+    const numMatch = invNum.match(/\d+$/);
+    if (numMatch) {
+      const n = parseInt(numMatch[0], 10);
+      if (invNum.startsWith(prefix) || inv.doc_type === docType) {
+        if (n > maxNumInDb) {
+          maxNumInDb = n;
+        }
+      }
+    }
+  }
+
+  if (maxNumInDb >= seq) {
+    seq = maxNumInDb + 1;
+  }
+
+  if (docType === 'INVOICE') {
+    numbering.nextNumberINV = seq + 1;
+  } else if (docType === 'ESTIMATE' || docType === 'PROFORMA') {
+    numbering.nextNumberEST = seq + 1;
+  } else if (docType === 'RECEIPT') {
     numbering.nextNumberREC = seq + 1;
   } else {
     numbering.nextNumberBOS = seq + 1;
@@ -961,6 +1032,90 @@ app.get('/api/budget/summary', (req: Request, res: Response) => {
   const month = (req.query.month as string) || new Date().toISOString().substring(0, 7);
 
   try {
+    if (month === 'all') {
+      // Aggregate across all months for lifetime overview
+      const earliestSummary: any = db.prepare('SELECT starting_debt, previous_remaining FROM monthly_budget_summaries ORDER BY month ASC LIMIT 1').get();
+      const startingDebt = earliestSummary?.starting_debt || 0;
+      const previousRemaining = earliestSummary?.previous_remaining || 0;
+
+      const sumTotals: any = db.prepare(`
+        SELECT 
+          SUM(dept_payment) as total_debt_paid,
+          SUM(borrow_amount) as total_borrow_summary,
+          SUM(reg_savings) as total_reg_savings,
+          SUM(ext_savings) as total_ext_savings
+        FROM monthly_budget_summaries
+      `).get();
+
+      // Aggregate all expenses
+      const expRows: any[] = db.prepare('SELECT category, SUM(amount) as total FROM expenses GROUP BY category').all();
+      let regExpense = 0;
+      let extExpense = 0;
+      expRows.forEach((r) => {
+        if (r.category === 'reg') regExpense = r.total || 0;
+        else extExpense += r.total || 0;
+      });
+      const totalExpense = regExpense + extExpense;
+
+      // Aggregate all income
+      const incRows: any[] = db.prepare('SELECT category, SUM(amount) as total FROM income_entries GROUP BY category').all();
+      let salary = 0;
+      let freelance = 0;
+      let returns = 0;
+      let extIncome = 0;
+      incRows.forEach((r) => {
+        if (r.category === 'sal') salary = r.total || 0;
+        else if (r.category === 'fl') freelance = r.total || 0;
+        else if (r.category === 'rt') returns = r.total || 0;
+        else extIncome += r.total || 0;
+      });
+
+      const borrowRetRow: any = db.prepare('SELECT SUM(amount) as total FROM borrow_records WHERE type = ?').get('RETURN');
+      if (borrowRetRow && borrowRetRow.total) {
+        returns = Math.max(returns, borrowRetRow.total);
+      }
+
+      const borrowRow: any = db.prepare('SELECT SUM(amount) as total FROM borrow_records WHERE type = ?').get('BORROW');
+      const autoBorrow = borrowRow && borrowRow.total ? borrowRow.total : 0;
+      const finalBorrow = sumTotals?.total_borrow_summary || autoBorrow;
+
+      const totalIncomeEarned = salary + freelance + returns + extIncome;
+      const totalInflow = previousRemaining + totalIncomeEarned;
+      const debtPayment = sumTotals?.total_debt_paid || 0;
+
+      const overhead = (totalInflow + finalBorrow) - (totalExpense + debtPayment);
+      const overheadSavings = overhead > 0 ? Math.round(overhead / 2) : 0;
+      const totalSavings = (sumTotals?.total_reg_savings || 0) + (sumTotals?.total_ext_savings || 0) + overheadSavings;
+      const remaining = overhead - overheadSavings;
+      const endingDebt = startingDebt + finalBorrow - debtPayment;
+
+      return res.json({
+        month: 'all',
+        starting_debt: startingDebt,
+        previous_remaining: previousRemaining,
+        salary,
+        freelance,
+        returns,
+        ext_income: extIncome,
+        total_income_earned: totalIncomeEarned,
+        total_income: totalInflow,
+        total_inflow: totalInflow,
+        reg_savings: sumTotals?.total_reg_savings || 0,
+        ext_savings: sumTotals?.total_ext_savings || 0,
+        reg_expense: regExpense,
+        ext_expense: extExpense,
+        total_expense: totalExpense,
+        dept_payment: debtPayment,
+        borrow_amount: finalBorrow,
+        overhead,
+        overhead_savings: overheadSavings,
+        total_savings: totalSavings,
+        remaining,
+        ending_debt: endingDebt,
+        notes: 'All-time lifetime aggregated summary',
+      });
+    }
+
     // 1. Get or create manual summary record
     let summary: any = db.prepare('SELECT * FROM monthly_budget_summaries WHERE month = ?').get(month);
     if (!summary) {
@@ -1427,7 +1582,7 @@ app.get('/api/budget/expenses', (req: Request, res: Response) => {
     let query = 'SELECT * FROM expenses WHERE 1=1';
     const params: any[] = [];
 
-    if (month) {
+    if (month && month !== 'all') {
       query += ' AND month = ?';
       params.push(month);
     }
@@ -1554,7 +1709,7 @@ app.get('/api/budget/income', (req: Request, res: Response) => {
   try {
     let query = 'SELECT * FROM income_entries WHERE 1=1';
     const params: any[] = [];
-    if (month) {
+    if (month && month !== 'all') {
       query += ' AND month = ?';
       params.push(month);
     }
@@ -1650,7 +1805,7 @@ app.get('/api/budget/borrow', (req: Request, res: Response) => {
   try {
     let query = 'SELECT * FROM borrow_records WHERE 1=1';
     const params: any[] = [];
-    if (month) {
+    if (month && month !== 'all') {
       query += ' AND month = ?';
       params.push(month);
     }
@@ -1820,8 +1975,14 @@ app.delete('/api/budget/goals/:id', (req: Request, res: Response) => {
 app.get('/api/budget/allocations', (req: Request, res: Response) => {
   const month = (req.query.month as string) || new Date().toISOString().substring(0, 7);
   try {
+    const isAll = month === 'all';
     // Get total income for month consistent with summary
-    const incRows: any[] = db.prepare('SELECT category, SUM(amount) as total FROM income_entries WHERE month = ? GROUP BY category').all(month);
+    const incQuery = isAll
+      ? 'SELECT category, SUM(amount) as total FROM income_entries GROUP BY category'
+      : 'SELECT category, SUM(amount) as total FROM income_entries WHERE month = ? GROUP BY category';
+    const incParams = isAll ? [] : [month];
+    const incRows: any[] = db.prepare(incQuery).all(...incParams);
+
     let incSum = 0;
     let rtFromInc = 0;
     incRows.forEach((r) => {
@@ -1829,19 +1990,31 @@ app.get('/api/budget/allocations', (req: Request, res: Response) => {
       if (r.category === 'rt') rtFromInc = r.total || 0;
     });
 
-    const borrowRetRow: any = db
-      .prepare('SELECT SUM(amount) as total FROM borrow_records WHERE month = ? AND type = ?')
-      .get(month, 'RETURN');
+    const borrowRetQuery = isAll
+      ? 'SELECT SUM(amount) as total FROM borrow_records WHERE type = ?'
+      : 'SELECT SUM(amount) as total FROM borrow_records WHERE month = ? AND type = ?';
+    const borrowRetParams = isAll ? ['RETURN'] : [month, 'RETURN'];
+    const borrowRetRow: any = db.prepare(borrowRetQuery).get(...borrowRetParams);
     const rtFromBorrow = borrowRetRow?.total || 0;
     const returnsToAdd = Math.max(0, rtFromBorrow - rtFromInc);
 
     const totalIncomeEarned = incSum + returnsToAdd;
-    const sumRow: any = db.prepare('SELECT previous_remaining FROM monthly_budget_summaries WHERE month = ?').get(month);
-    const previousRemaining = sumRow?.previous_remaining || 0;
+    let previousRemaining = 0;
+    if (isAll) {
+      const earliestSummary: any = db.prepare('SELECT previous_remaining FROM monthly_budget_summaries ORDER BY month ASC LIMIT 1').get();
+      previousRemaining = earliestSummary?.previous_remaining || 0;
+    } else {
+      const sumRow: any = db.prepare('SELECT previous_remaining FROM monthly_budget_summaries WHERE month = ?').get(month);
+      previousRemaining = sumRow?.previous_remaining || 0;
+    }
     const totalIncome = totalIncomeEarned + previousRemaining;
 
     const rules: any[] = db.prepare('SELECT * FROM budget_allocation_rules ORDER BY display_order ASC').all();
-    const expenses: any[] = db.prepare('SELECT tag, category, SUM(amount) as spent FROM expenses WHERE month = ? GROUP BY tag, category').all(month);
+    const expQuery = isAll
+      ? 'SELECT tag, category, SUM(amount) as spent FROM expenses GROUP BY tag, category'
+      : 'SELECT tag, category, SUM(amount) as spent FROM expenses WHERE month = ? GROUP BY tag, category';
+    const expParams = isAll ? [] : [month];
+    const expenses: any[] = db.prepare(expQuery).all(...expParams);
 
     // Map rules to actual spending
     const allocations = rules.map((r) => {

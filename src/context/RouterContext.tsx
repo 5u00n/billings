@@ -40,6 +40,13 @@ export function parseRoute(pathname: string): RouteState {
     }
     case 'budget': {
       const subTab = segments[1]; // 'spreadsheet' | 'income' | 'returns' | 'expenses' | 'loans' | 'goals' | 'allocations'
+      if (subTab === 'returns') return { path: '/returns', tab: 'returns' };
+      if (subTab === 'spreadsheet') return { path: '/spreadsheet', tab: 'spreadsheet' };
+      if (subTab === 'allocations') return { path: '/allocations', tab: 'allocations' };
+      if (subTab === 'loans' || subTab === 'borrow') return { path: '/loans', tab: 'borrow' };
+      if (subTab === 'income') return { path: '/income', tab: 'income' };
+      if (subTab === 'expenses') return { path: '/expenses', tab: 'expenses' };
+      if (subTab === 'goals') return { path: '/goals', tab: 'goals' };
       return { path: cleanPath, tab: 'budget', subTab };
     }
     case 'expenses':
@@ -47,11 +54,15 @@ export function parseRoute(pathname: string): RouteState {
     case 'income':
       return { path: cleanPath, tab: 'income' };
     case 'returns':
-      return { path: '/budget/returns', tab: 'budget', subTab: 'returns' };
+      return { path: '/returns', tab: 'returns' };
+    case 'spreadsheet':
+      return { path: '/spreadsheet', tab: 'spreadsheet' };
+    case 'allocations':
+      return { path: '/allocations', tab: 'allocations' };
     case 'loans':
     case 'debts':
     case 'borrow':
-      return { path: '/budget/loans', tab: 'budget', subTab: 'borrow' };
+      return { path: '/loans', tab: 'borrow' };
     case 'goals':
       return { path: cleanPath, tab: 'goals' };
     case 'tax':
@@ -80,12 +91,18 @@ export function tabToPath(tab: NavTab, subTab?: string): string {
       return '/organizations';
     case 'budget':
       return subTab ? `/budget/${subTab}` : '/budget';
+    case 'spreadsheet':
+      return '/spreadsheet';
+    case 'returns':
+      return '/returns';
+    case 'allocations':
+      return '/allocations';
     case 'expenses':
       return '/expenses';
     case 'income':
       return '/income';
     case 'borrow':
-      return '/budget/loans';
+      return '/loans';
     case 'goals':
       return '/goals';
     case 'tax':

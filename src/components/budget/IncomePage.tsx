@@ -52,6 +52,7 @@ export const IncomePage: React.FC = () => {
   };
 
   const formatMonthLabel = (m: string) => {
+    if (m === 'all') return 'All Months (Lifetime)';
     const parts = m.split('-');
     if (parts.length === 2) {
       const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
@@ -87,6 +88,7 @@ export const IncomePage: React.FC = () => {
               onChange={(e) => setSelectedMonth(e.target.value)}
               className="pl-8 pr-8 py-2 text-xs font-bold text-slate-800 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer shadow-2xs"
             >
+              <option value="all">All Months (Lifetime)</option>
               {availableMonths.map((m) => (
                 <option key={m} value={m}>
                   {formatMonthLabel(m)} ({m})

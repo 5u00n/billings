@@ -1,0 +1,16 @@
+{
+  "auth": {
+    "providers": {
+      "anonymous": false,
+      "emailPassword": true,
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "Suren Billings",
+        "supportEmail": "surenhembram97@gmail.com",
+        "authorizedRedirectUris": [
+          "https://suren-billings-app.firebaseapp.com/__/auth/handler",
+          "http://localhost:5173"
+        ]
+      }
+    }
+  }
+}

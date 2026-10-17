@@ -81,12 +81,14 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({
   const [newOrgAddress, setNewOrgAddress] = useState('');
   const [newOrgCity, setNewOrgCity] = useState('');
 
+  const isEditingExisting = Boolean(invoice && invoice.id);
+
   // Fetch next number if creating new invoice
   useEffect(() => {
-    if (!invoice && !invoiceNumber) {
+    if (!isEditingExisting && !invoice?.invoice_number) {
       fetchNextNumber(docType);
     }
-  }, [docType]);
+  }, [docType, isEditingExisting]);
 
   const fetchNextNumber = async (type: DocType) => {
     try {

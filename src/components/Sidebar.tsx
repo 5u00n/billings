@@ -20,10 +20,14 @@ import {
   Laptop,
   X,
   Landmark,
+  HandCoins,
+  FileSpreadsheet,
+  LogOut,
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { cn } from '../lib/utils';
 import { useTheme } from '../context/ThemeContext';
+import { useAuth } from '../context/AuthContext';
 
 export type NavTab =
   | 'dashboard'
@@ -32,9 +36,12 @@ export type NavTab =
   | 'automations'
   | 'catalog'
   | 'budget'
-  | 'expenses'
+  | 'spreadsheet'
   | 'income'
+  | 'returns'
+  | 'expenses'
   | 'borrow'
+  | 'allocations'
   | 'goals'
   | 'tax'
   | 'settings';
@@ -67,6 +74,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapse: externalOnToggleCollapse,
 }) => {
   const { theme, resolvedTheme, setTheme } = useTheme();
+  const { user, signOutUser } = useAuth();
 
   // Internal collapse state if not provided externally
   const [internalCollapsed, setInternalCollapsed] = useState(() => {
@@ -141,9 +149,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
       items: [
         {
           id: 'budget' as NavTab,
-          label: 'Budget & Allocations',
-          icon: Layers,
+          label: 'Budget Overview',
+          icon: LayoutDashboard,
           color: 'text-indigo-400',
+        },
+        {
+          id: 'spreadsheet' as NavTab,
+          label: 'Excel Spreadsheet',
+          icon: FileSpreadsheet,
+          color: 'text-blue-400',
+        },
+        {
+          id: 'income' as NavTab,
+          label: 'Income Streams',
+          icon: Wallet,
+          color: 'text-emerald-400',
+        },
+        {
+          id: 'returns' as NavTab,
+          label: 'Returns (Repaid)',
+          icon: HandCoins,
+          color: 'text-teal-400',
         },
         {
           id: 'expenses' as NavTab,
@@ -153,17 +179,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
           count: expenseCount,
         },
         {
-          id: 'income' as NavTab,
-          label: 'Income Streams',
-          icon: Wallet,
-          color: 'text-emerald-400',
-        },
-        {
           id: 'borrow' as NavTab,
           label: 'Loans & Debts',
           icon: ArrowLeftRight,
           color: 'text-amber-400',
           count: pendingLoansCount,
+        },
+        {
+          id: 'allocations' as NavTab,
+          label: 'Allocation Envelopes',
+          icon: Layers,
+          color: 'text-purple-400',
         },
         {
           id: 'goals' as NavTab,
@@ -347,80 +373,153 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           {/* Footer Info & Theme Switcher */}
-          <div className="p-3 border-t border-slate-800/60 bg-slate-950/60 space-y-2 shrink-0">
-            {/* Theme Switcher Toggle */}
-            <div
-              className={cn(
-                'p-1.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between text-xs',
-                isCollapsed && 'md:p-1 md:justify-center'
-              )}
-            >
-              <div className={cn('flex items-center gap-1.5 px-1 text-[11px] font-medium text-slate-400', isCollapsed && 'md:hidden')}>
-                {resolvedTheme === 'dark' ? (
-                  <>
-                    <Moon className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Dark Mode</span>
-                  </>
-                ) : (
-                  <>
-                    <Sun className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Light Mode</span>
-                  </>
+          <div className="p-3 border-t border-slate-800/60 bg-slate-950/60 shrink-0">
+            {isCollapsed ? (
+              /* Retracted / Collapsed Footer View */
+              <div className="hidden md:flex flex-col items-center gap-2.5">
+                {/* Single Theme Toggle Button */}
+                <button
+                  onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
+                  title={resolvedTheme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                  className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition-colors shadow-2xs"
+                >
+                  {resolvedTheme === 'dark' ? (
+                    <Moon className="w-4 h-4 text-blue-400" />
+                  ) : (
+                    <Sun className="w-4 h-4 text-amber-400" />
+                  )}
+                </button>
+
+                {/* Collapsed Udyam Badge */}
+                <div
+                  title="Udyam Verified: Non-GST Small Entity (Active)"
+                  className="w-10 h-10 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-center shrink-0 cursor-default"
+                >
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                </div>
+
+                {/* Collapsed User Avatar & Sign Out */}
+                {user && (
+                  <div className="flex flex-col items-center gap-1.5 pt-1.5 border-t border-slate-800/80 w-full">
+                    <div
+                      title={`Signed in as ${user.displayName || user.email}`}
+                      className="w-8 h-8 rounded-full bg-blue-600/30 border border-blue-500/40 text-blue-300 flex items-center justify-center font-bold text-xs uppercase overflow-hidden"
+                    >
+                      {user.photoURL ? (
+                        <img src={user.photoURL} alt="User" className="w-full h-full object-cover" />
+                      ) : (
+                        <span>{user.displayName?.[0] || user.email?.[0] || 'U'}</span>
+                      )}
+                    </div>
+                    <button
+                      onClick={signOutUser}
+                      title="Sign Out"
+                      className="w-8 h-7 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-900 flex items-center justify-center transition-colors"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 )}
               </div>
+            ) : null}
 
-              {/* 3-mode switch */}
-              <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800/80">
-                <button
-                  onClick={() => setTheme('light')}
-                  title="Light Mode"
-                  className={cn(
-                    'p-1 rounded-md transition-colors',
-                    theme === 'light' ? 'bg-slate-800 text-amber-300 shadow-2xs' : 'text-slate-500 hover:text-slate-300'
-                  )}
-                >
-                  <Sun className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => setTheme('dark')}
-                  title="Dark Mode"
-                  className={cn(
-                    'p-1 rounded-md transition-colors',
-                    theme === 'dark' ? 'bg-slate-800 text-blue-400 shadow-2xs' : 'text-slate-500 hover:text-slate-300'
-                  )}
-                >
-                  <Moon className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => setTheme('system')}
-                  title="System Mode"
-                  className={cn(
-                    'p-1 rounded-md transition-colors',
-                    theme === 'system' ? 'bg-slate-800 text-slate-200 shadow-2xs' : 'text-slate-500 hover:text-slate-300'
-                  )}
-                >
-                  <Laptop className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
+            {/* Expanded Footer View */}
+            <div className={cn('space-y-2', isCollapsed && 'md:hidden')}>
+              {/* User Profile Card */}
+              {user && (
+                <div className="p-2 rounded-xl bg-slate-900/70 border border-slate-800 flex items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <div className="w-7 h-7 rounded-full bg-blue-600/30 border border-blue-500/40 text-blue-300 flex items-center justify-center font-bold text-xs uppercase shrink-0 overflow-hidden">
+                      {user.photoURL ? (
+                        <img src={user.photoURL} alt="User" className="w-full h-full object-cover" />
+                      ) : (
+                        <span>{user.displayName?.[0] || user.email?.[0] || 'U'}</span>
+                      )}
+                    </div>
+                    <div className="overflow-hidden">
+                      <div className="text-[11px] font-semibold text-slate-200 truncate">
+                        {user.displayName || 'Authorized User'}
+                      </div>
+                      <div className="text-[9px] text-slate-400 truncate">
+                        {user.email || 'Local Owner'}
+                      </div>
+                    </div>
+                  </div>
 
-            {/* Verification Badge */}
-            <div
-              className={cn(
-                'flex items-center justify-between p-2 rounded-lg bg-slate-900/60 border border-slate-800 text-xs',
-                isCollapsed && 'md:hidden'
+                  <button
+                    onClick={signOutUser}
+                    title="Sign Out"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors shrink-0"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               )}
-            >
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                <div className="overflow-hidden">
-                  <div className="text-[11px] font-semibold text-slate-200 truncate">Udyam Verified</div>
-                  <div className="text-[9px] text-slate-400 truncate">Non-GST Small Entity</div>
+
+              {/* Theme Switcher Toggle */}
+              <div className="p-1.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-1.5 px-1 text-[11px] font-medium text-slate-400">
+                  {resolvedTheme === 'dark' ? (
+                    <>
+                      <Moon className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Dark Mode</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sun className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Light Mode</span>
+                    </>
+                  )}
+                </div>
+
+                {/* 3-mode switch */}
+                <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800/80">
+                  <button
+                    onClick={() => setTheme('light')}
+                    title="Light Mode"
+                    className={cn(
+                      'p-1 rounded-md transition-colors',
+                      theme === 'light' ? 'bg-slate-800 text-amber-300 shadow-2xs' : 'text-slate-500 hover:text-slate-300'
+                    )}
+                  >
+                    <Sun className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setTheme('dark')}
+                    title="Dark Mode"
+                    className={cn(
+                      'p-1 rounded-md transition-colors',
+                      theme === 'dark' ? 'bg-slate-800 text-blue-400 shadow-2xs' : 'text-slate-500 hover:text-slate-300'
+                    )}
+                  >
+                    <Moon className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setTheme('system')}
+                    title="System Mode"
+                    className={cn(
+                      'p-1 rounded-md transition-colors',
+                      theme === 'system' ? 'bg-slate-800 text-slate-200 shadow-2xs' : 'text-slate-500 hover:text-slate-300'
+                    )}
+                  >
+                    <Laptop className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
-              <span className="text-[9px] bg-emerald-950 border border-emerald-800 text-emerald-400 px-1.5 py-0.5 rounded font-mono shrink-0">
-                Active
-              </span>
+
+              {/* Verification Badge */}
+              <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900/60 border border-slate-800 text-xs">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <div className="overflow-hidden">
+                    <div className="text-[11px] font-semibold text-slate-200 truncate">Udyam Verified</div>
+                    <div className="text-[9px] text-slate-400 truncate">Non-GST Small Entity</div>
+                  </div>
+                </div>
+                <span className="text-[9px] bg-emerald-950 border border-emerald-800 text-emerald-400 px-1.5 py-0.5 rounded font-mono shrink-0">
+                  Active
+                </span>
+              </div>
             </div>
           </div>
         </div>

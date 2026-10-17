@@ -12,14 +12,20 @@ import { BudgetDashboard } from './components/budget/BudgetDashboard';
 import { ExpensePage } from './components/budget/ExpensePage';
 import { IncomePage } from './components/budget/IncomePage';
 import { BorrowPage } from './components/budget/BorrowPage';
+import { ReturnsPage } from './components/budget/ReturnsPage';
+import { SpreadsheetPage } from './components/budget/SpreadsheetPage';
+import { AllocationsPage } from './components/budget/AllocationsPage';
 import { GoalsPage } from './components/budget/GoalsPage';
 import { TaxPortal } from './components/tax/TaxPortal';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { RouterProvider, useRouter } from './context/RouterContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { LoginPage } from './components/auth/LoginPage';
 import { Menu, Sun, Moon, Plus } from 'lucide-react';
 import { Button } from './components/ui/button';
 
 export const AppContent: React.FC = () => {
+  const { user, loading: authLoading } = useAuth();
   const { resolvedTheme, toggleTheme } = useTheme();
   const { route, navigate, tabToPath } = useRouter();
   const currentTab = route.tab;
@@ -47,8 +53,10 @@ export const AppContent: React.FC = () => {
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchAllData();
-  }, []);
+    if (user) {
+      fetchAllData();
+    }
+  }, [user]);
 
   // Sync route parameters with state (e.g. /invoices/new, /invoices/:id, /organizations/:id)
   useEffect(() => {
@@ -154,26 +162,33 @@ export const AppContent: React.FC = () => {
 
   const handleSaveInvoice = async (invoiceData: Partial<Invoice>) => {
     try {
+      let res: Response;
       if (invoiceData.id && editingInvoice && editingInvoice.id === invoiceData.id) {
-        await fetch(`/api/invoices/${invoiceData.id}`, {
+        res = await fetch(`/api/invoices/${invoiceData.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(invoiceData),
         });
       } else {
-        await fetch('/api/invoices', {
+        res = await fetch('/api/invoices', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(invoiceData),
         });
       }
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Server returned error (${res.status})`);
+      }
+
       setIsEditorOpen(false);
       setEditingInvoice(null);
       await fetchAllData();
       navigate('/invoices');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to save invoice:', err);
-      alert('Failed to save invoice. Please check the server logs.');
+      alert(`Failed to save invoice: ${err.message || 'Please check the server logs.'}`);
     }
   };
 
@@ -260,13 +275,19 @@ export const AppContent: React.FC = () => {
       case 'organizations':
         return 'Client Organizations';
       case 'budget':
-        return 'Personal Budget & Expense Ledger';
+        return 'Budget Overview';
+      case 'spreadsheet':
+        return 'Multi-Month Spreadsheet';
+      case 'returns':
+        return 'Returns (Money Repaid to Me)';
+      case 'allocations':
+        return '100% Allocation Envelopes';
       case 'expenses':
         return 'Expense Ledger';
       case 'income':
         return 'Personal Income Streams';
       case 'borrow':
-        return 'Loans, Debts & Returns';
+        return 'Loans & Debts';
       case 'goals':
         return 'Financial Goals';
       case 'tax':
@@ -281,6 +302,22 @@ export const AppContent: React.FC = () => {
         return 'Billings';
     }
   };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center font-sans text-slate-200">
+        <div className="w-12 h-12 rounded-2xl bg-blue-600 flex items-center justify-center font-bold text-white text-xl shadow-lg mb-4 animate-pulse">
+          H
+        </div>
+        <div className="text-sm font-semibold tracking-wide text-white">Suren Billings</div>
+        <div className="text-xs text-slate-500 mt-1">Securing financial session...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage />;
+  }
 
   return (
     <div className="flex h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans transition-colors duration-200">
@@ -408,6 +445,18 @@ export const AppContent: React.FC = () => {
                 <BudgetDashboard profile={defaultProfile} />
               )}
 
+              {currentTab === 'spreadsheet' && (
+                <SpreadsheetPage profile={defaultProfile} />
+              )}
+
+              {currentTab === 'returns' && (
+                <ReturnsPage />
+              )}
+
+              {currentTab === 'allocations' && (
+                <AllocationsPage />
+              )}
+
               {currentTab === 'expenses' && (
                 <ExpensePage />
               )}
@@ -484,9 +533,11 @@ export const AppContent: React.FC = () => {
 export const App: React.FC = () => {
   return (
     <ThemeProvider>
-      <RouterProvider>
-        <AppContent />
-      </RouterProvider>
+      <AuthProvider>
+        <RouterProvider>
+          <AppContent />
+        </RouterProvider>
+      </AuthProvider>
     </ThemeProvider>
   );
 };

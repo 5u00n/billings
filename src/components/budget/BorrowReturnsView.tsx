@@ -166,99 +166,63 @@ export const BorrowReturnsView: React.FC<BorrowReturnsViewProps> = ({
     .reduce((sum, r) => sum + r.amount, 0);
 
   return (
-    <div className="space-y-6">
-      {/* Summary KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-2xs">
-          <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Pending Borrowed (My Debt)</span>
-          <div className="mt-1 flex items-baseline justify-between">
-            <span className="text-xl font-bold text-red-600 dark:text-red-400">₹{formatINR(totalBorrowedPending)}</span>
-            <span className="text-xs text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/60 px-2 py-0.5 rounded-full font-semibold">Liabilities</span>
-          </div>
-          <p className="text-[10px] text-slate-400 mt-1">Active loans taken by you from people or banks</p>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-2xs">
-          <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Settled / Repaid Debts</span>
-          <div className="mt-1 flex items-baseline justify-between">
-            <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400">₹{formatINR(totalBorrowedSettled)}</span>
-            <span className="text-xs text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full font-semibold">Cleared</span>
-          </div>
-          <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1">Loans you have completely paid back</p>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-2xs">
-          <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Lent to Others (Receivable)</span>
-          <div className="mt-1 flex items-baseline justify-between">
-            <span className="text-xl font-bold text-blue-600 dark:text-blue-400">₹{formatINR(totalLentPending)}</span>
-            <span className="text-xs text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded-full font-semibold">Active Loans</span>
-          </div>
-          <p className="text-[10px] text-slate-400 mt-1">Money you gave to others to be returned</p>
-        </div>
-
-        <div className="flex items-center">
-          <Button
-            onClick={handleOpenNew}
-            className="w-full h-full min-h-[58px] bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white font-medium shadow-xs flex items-center justify-center gap-2 rounded-xl text-xs cursor-pointer transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Add Loan / Borrow
-          </Button>
-        </div>
-      </div>
-
-      {/* Filter and Search Bar */}
+    <div className="space-y-4">
+      {/* Clean Single Toolbar */}
       <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-2xs flex flex-col md:flex-row items-center justify-between gap-3">
         <div className="relative w-full md:w-80">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search person or reason..."
+            placeholder="Search lender or reason..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-          {/* Type filters */}
+        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-between md:justify-end">
+          {/* Status filter */}
           <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300">
             <button
-              onClick={() => setFilterType('ALL')}
+              onClick={() => setStatusFilter('ALL')}
               className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
-                filterType === 'ALL' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs font-semibold' : 'hover:text-slate-900 dark:hover:text-white'
+                statusFilter === 'ALL' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs font-semibold' : 'hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              All Loans
+              All
             </button>
             <button
-              onClick={() => setFilterType('BORROW')}
+              onClick={() => setStatusFilter('PENDING')}
               className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
-                filterType === 'BORROW' ? 'bg-white dark:bg-slate-900 text-red-700 dark:text-red-400 shadow-2xs font-semibold' : 'hover:text-slate-900 dark:hover:text-white'
+                statusFilter === 'PENDING' ? 'bg-white dark:bg-slate-900 text-red-700 dark:text-red-400 shadow-2xs font-semibold' : 'hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              Borrowed (Debt)
+              Active Debt
             </button>
             <button
-              onClick={() => setFilterType('LENT')}
+              onClick={() => setStatusFilter('SETTLED')}
               className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
-                filterType === 'LENT' ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-400 shadow-2xs font-semibold' : 'hover:text-slate-900 dark:hover:text-white'
+                statusFilter === 'SETTLED' ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-2xs font-semibold' : 'hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              Lent Out
+              Settled / Paid
             </button>
           </div>
 
-          {/* Status filter */}
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as any)}
-            className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 dark:text-slate-200 rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          {/* Active Debt Badge */}
+          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 rounded-lg text-xs">
+            <span className="text-slate-500 dark:text-slate-400">Active Debt:</span>
+            <span className="font-bold text-red-700 dark:text-red-400">₹{formatINR(totalBorrowedPending)}</span>
+          </div>
+
+          {/* Add Loan Button */}
+          <Button
+            onClick={handleOpenNew}
+            className="h-8 px-3.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white font-medium shadow-xs flex items-center gap-1.5 rounded-lg text-xs cursor-pointer transition-colors"
           >
-            <option value="ALL">All Status</option>
-            <option value="PENDING">Pending Only</option>
-            <option value="SETTLED">Settled Only</option>
-          </select>
+            <Plus className="w-3.5 h-3.5" />
+            Add Loan / Borrow
+          </Button>
         </div>
       </div>
 
@@ -375,7 +339,7 @@ export const BorrowReturnsView: React.FC<BorrowReturnsViewProps> = ({
           <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-900">
-                {editingRecord ? 'Edit Loan / Return Record' : 'Add Loan / Borrow Record'}
+                {editingRecord ? 'Edit Loan / Debt Record' : 'Record New Loan / Debt'}
               </h3>
               <button
                 onClick={() => setIsModalOpen(false)}

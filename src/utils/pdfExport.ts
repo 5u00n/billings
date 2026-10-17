@@ -25,6 +25,7 @@ export async function downloadInvoicePdf(invoice: Invoice, profile?: UserProfile
       udyamNumber: 'UDYAM-JH-06-0090498-01-0004921',
       showUdyamOnBill: true,
       bankName: 'State Bank of India',
+      accountType: 'Current Account',
       accountNumber: '45661497562',
       ifscCode: 'SBIN0014355',
       accountHolder: 'Suren Hembram',

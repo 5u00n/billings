@@ -3,7 +3,7 @@ import { Invoice, Organization, UserProfile, LineItem, DocType, CatalogItem } fr
 import { InvoicePreview } from './InvoicePreview';
 import { exportInvoiceDocx } from '../utils/docxExport';
 import { printInvoice, downloadInvoicePdf } from '../utils/pdfExport';
-import { Plus, Trash2, Printer, FileDown, Save, ArrowLeft, Building2, Sparkles, X } from 'lucide-react';
+import { Plus, Trash2, Printer, FileDown, Save, ArrowLeft, Building2, Package, X } from 'lucide-react';
 import { formatINR, numberToIndianWords } from '../utils/numberToWords';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -64,6 +64,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({
       [
         profile.bankName ? `Bank: ${profile.bankName}` : '',
         profile.accountNumber ? `A/C: ${profile.accountNumber}` : '',
+        (profile.accountType || profile.bankName) ? `A/C Type: ${profile.accountType || 'Current Account'}` : '',
         profile.ifscCode ? `IFSC: ${profile.ifscCode}` : '',
         profile.upiId ? `UPI: ${profile.upiId}` : '',
       ]
@@ -148,7 +149,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({
   };
 
   const handleQuickAddBankDetails = () => {
-    const bankSnippet = `Bank: ${profile.bankName}\nA/C: ${profile.accountNumber}\nIFSC: ${profile.ifscCode}\nName: ${profile.accountHolder || profile.name}`;
+    const bankSnippet = `Bank: ${profile.bankName}\nA/C: ${profile.accountNumber}\nA/C Type: ${profile.accountType || 'Current Account'}\nIFSC: ${profile.ifscCode}\nName: ${profile.accountHolder || profile.name}`;
     setPaymentOptions((prev) => (prev ? `${prev}\n\n${bankSnippet}` : bankSnippet));
   };
 
@@ -352,7 +353,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({
         {(viewMode === 'form' || viewMode === 'split') && (
           <div
             className={`flex-1 overflow-y-auto p-6 transition-all ${
-              viewMode === 'split' ? 'lg:max-w-[50%] border-r border-slate-200' : 'max-w-4xl mx-auto w-full'
+              viewMode === 'split' ? 'lg:max-w-[50%] border-r border-slate-200 dark:border-slate-800' : 'w-full'
             }`}
           >
             <div className="space-y-5">
@@ -529,7 +530,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({
 
                     {catalog.length > 0 && (
                       <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                        <Sparkles className="w-3.5 h-3.5 text-purple-500" />
+                        <Package className="w-3.5 h-3.5 text-purple-500" />
                         <select
                           onChange={(e) => {
                             const cat = catalog.find((c) => c.id === e.target.value);

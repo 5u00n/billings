@@ -181,7 +181,7 @@ export const OrganizationDetail: React.FC<OrganizationDetailProps> = ({
         <CardContent className="p-6 flex flex-col lg:flex-row justify-between gap-6">
           <div className="space-y-3 flex-1">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-xl shadow-xs shrink-0">
+              <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 flex items-center justify-center font-bold text-xl shadow-xs shrink-0">
                 <Building2 className="w-6 h-6" />
               </div>
               <div>

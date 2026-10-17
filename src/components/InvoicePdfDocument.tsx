@@ -550,6 +550,9 @@ export const InvoicePdfDocument: React.FC<InvoicePdfDocumentProps> = ({
                           <Text style={[styles.paymentLine, { fontFamily: 'Helvetica-Bold' }]}>
                             A/C No: {profile.accountNumber}
                           </Text>
+                          <Text style={styles.paymentLine}>
+                            A/C Type: {invoice.accountType || profile.accountType || 'Current Account'}
+                          </Text>
                           <Text style={styles.paymentLine}>IFSC: {profile.ifscCode}</Text>
                           <Text style={styles.paymentLine}>
                             A/C Name: {profile.accountHolder || profile.name}

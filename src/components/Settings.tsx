@@ -368,6 +368,23 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSaveSettings, on
               </div>
 
               <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Bank Account Type</label>
+                <Input
+                  type="text"
+                  list="account-type-presets"
+                  value={profile.accountType || 'Current Account'}
+                  onChange={(e) => handleProfileChange('accountType', e.target.value)}
+                  placeholder="e.g. Current Account"
+                />
+                <datalist id="account-type-presets">
+                  <option value="Current Account" />
+                  <option value="Savings Account" />
+                  <option value="Cash Credit (CC) Account" />
+                  <option value="Overdraft (OD) Account" />
+                </datalist>
+              </div>
+
+              <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">IFSC Code</label>
                 <Input
                   type="text"

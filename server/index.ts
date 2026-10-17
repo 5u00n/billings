@@ -1,12 +1,14 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
+import path from 'path';
+import fs from 'fs';
 import { db } from './db';
 import { generateDocxBuffer } from './docxGenerator';
 import { generateVectorPdfBuffer } from './pdfGenerator';
 import { Invoice, Organization, UserProfile, NumberingSettings, CatalogItem } from '../src/types';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 5001;
 
 app.use(cors());
 app.use(express.json());
@@ -929,7 +931,1617 @@ app.post('/api/recurring/run-due', (_req: Request, res: Response) => {
   }
 });
 
+// ----------------- BUDGET & EXPENSE SYSTEM API -----------------
+
+// Get all active / available months
+app.get('/api/budget/months', (_req: Request, res: Response) => {
+  try {
+    const expMonths = db.prepare('SELECT DISTINCT month FROM expenses').all() as { month: string }[];
+    const incMonths = db.prepare('SELECT DISTINCT month FROM income_entries').all() as { month: string }[];
+    const sumMonths = db.prepare('SELECT DISTINCT month FROM monthly_budget_summaries').all() as { month: string }[];
+
+    const monthSet = new Set<string>();
+    expMonths.forEach((m) => m.month && monthSet.add(m.month));
+    incMonths.forEach((m) => m.month && monthSet.add(m.month));
+    sumMonths.forEach((m) => m.month && monthSet.add(m.month));
+
+    // Ensure current month is always present
+    const currentMonth = new Date().toISOString().substring(0, 7);
+    monthSet.add(currentMonth);
+
+    const sorted = Array.from(monthSet).sort().reverse();
+    res.json(sorted);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get monthly aggregated cashflow summary
+app.get('/api/budget/summary', (req: Request, res: Response) => {
+  const month = (req.query.month as string) || new Date().toISOString().substring(0, 7);
+
+  try {
+    // 1. Get or create manual summary record
+    let summary: any = db.prepare('SELECT * FROM monthly_budget_summaries WHERE month = ?').get(month);
+    if (!summary) {
+      summary = {
+        month,
+        starting_debt: 0,
+        previous_remaining: 0,
+        dept_payment: 0,
+        borrow_amount: 0,
+        reg_savings: 0,
+        ext_savings: 0,
+        notes: '',
+      };
+    }
+
+    // 2. Aggregate expenses
+    const expRows: any[] = db.prepare('SELECT category, SUM(amount) as total FROM expenses WHERE month = ? GROUP BY category').all(month);
+    let regExpense = 0;
+    let extExpense = 0;
+    expRows.forEach((r) => {
+      if (r.category === 'reg') regExpense = r.total || 0;
+      else extExpense += r.total || 0;
+    });
+    const totalExpense = regExpense + extExpense;
+
+    // 3. Aggregate income
+    const incRows: any[] = db.prepare('SELECT category, SUM(amount) as total FROM income_entries WHERE month = ? GROUP BY category').all(month);
+    let salary = 0;
+    let freelance = 0;
+    let returns = 0;
+    let extIncome = 0;
+    incRows.forEach((r) => {
+      if (r.category === 'sal') salary = r.total || 0;
+      else if (r.category === 'fl') freelance = r.total || 0;
+      else if (r.category === 'rt') returns = r.total || 0;
+      else extIncome += r.total || 0;
+    });
+
+    // Also include Returns from borrow_records if any
+    const borrowRetRow: any = db
+      .prepare('SELECT SUM(amount) as total FROM borrow_records WHERE month = ? AND type = ?')
+      .get(month, 'RETURN');
+    if (borrowRetRow && borrowRetRow.total) {
+      returns = Math.max(returns, borrowRetRow.total);
+    }
+
+    // Also check new borrow amount from borrow_records
+    const borrowRow: any = db
+      .prepare('SELECT SUM(amount) as total FROM borrow_records WHERE month = ? AND type = ?')
+      .get(month, 'BORROW');
+    const autoBorrow = borrowRow && borrowRow.total ? borrowRow.total : 0;
+    const finalBorrow = summary.borrow_amount || autoBorrow;
+
+    const previousRemaining = summary.previous_remaining || 0;
+    const totalIncomeEarned = salary + freelance + returns + extIncome;
+    const totalInflow = previousRemaining + totalIncomeEarned;
+    const debtPayment = summary.dept_payment || 0;
+
+    // Excel formula: Overhead = (Total Inflow + Borrow) - (Total Outflow + Debt Paid)
+    const overhead = (totalInflow + finalBorrow) - (totalExpense + debtPayment);
+    const overheadSavings = overhead > 0 ? Math.round(overhead / 2) : 0;
+    const totalSavings = (summary.reg_savings || 0) + (summary.ext_savings || 0) + overheadSavings;
+    const remaining = overhead - overheadSavings;
+    const endingDebt = (summary.starting_debt || 0) + finalBorrow - debtPayment;
+
+    res.json({
+      month,
+      starting_debt: summary.starting_debt || 0,
+      previous_remaining: previousRemaining,
+      salary,
+      freelance,
+      returns,
+      ext_income: extIncome,
+      total_income_earned: totalIncomeEarned,
+      total_income: totalInflow,
+      total_inflow: totalInflow,
+      reg_savings: summary.reg_savings || 0,
+      ext_savings: summary.ext_savings || 0,
+      overhead_savings: overheadSavings,
+      total_savings: totalSavings,
+      reg_expense: regExpense,
+      ext_expense: extExpense,
+      total_expense: totalExpense,
+      dept_payment: debtPayment,
+      borrow_amount: finalBorrow,
+      overhead,
+      remaining,
+      ending_debt: endingDebt,
+      notes: summary.notes || '',
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update summary parameters for a month (e.g. debt payment, starting debt)
+app.put('/api/budget/summary/:month', (req: Request, res: Response) => {
+  const month = req.params.month;
+  const body = req.body;
+
+  try {
+    const existing = db.prepare('SELECT month FROM monthly_budget_summaries WHERE month = ?').get(month);
+    if (existing) {
+      db.prepare(`
+        UPDATE monthly_budget_summaries SET
+          starting_debt = ?,
+          previous_remaining = ?,
+          dept_payment = ?,
+          borrow_amount = ?,
+          reg_savings = ?,
+          ext_savings = ?,
+          notes = ?
+        WHERE month = ?
+      `).run(
+        body.starting_debt || 0,
+        body.previous_remaining || 0,
+        body.dept_payment || 0,
+        body.borrow_amount || 0,
+        body.reg_savings || 0,
+        body.ext_savings || 0,
+        body.notes || '',
+        month
+      );
+    } else {
+      db.prepare(`
+        INSERT INTO monthly_budget_summaries (
+          month, starting_debt, previous_remaining, dept_payment, borrow_amount, reg_savings, ext_savings, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        month,
+        body.starting_debt || 0,
+        body.previous_remaining || 0,
+        body.dept_payment || 0,
+        body.borrow_amount || 0,
+        body.reg_savings || 0,
+        body.ext_savings || 0,
+        body.notes || ''
+      );
+    }
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Full Multi-Month Breakdown Ledger (Excel Income Tracker Table)
+app.get('/api/budget/monthly-breakdown', (_req: Request, res: Response) => {
+  try {
+    // 1. Gather all unique months across all budget tables
+    const monthSet = new Set<string>();
+    const sumMonths: any[] = db.prepare('SELECT DISTINCT month FROM monthly_budget_summaries').all();
+    const expMonths: any[] = db.prepare('SELECT DISTINCT month FROM expenses').all();
+    const incMonths: any[] = db.prepare('SELECT DISTINCT month FROM income_entries').all();
+    const brMonths: any[] = db.prepare('SELECT DISTINCT month FROM borrow_records').all();
+
+    [...sumMonths, ...expMonths, ...incMonths, ...brMonths].forEach((r) => {
+      if (r && r.month && r.month.length === 7) monthSet.add(r.month);
+    });
+
+    // Ensure default sequence (Aug, Sep, Oct 2026) exists
+    ['2026-08', '2026-09', '2026-10'].forEach((m) => monthSet.add(m));
+
+    const sortedMonths = Array.from(monthSet).sort();
+
+    // 2. Sequential calculation with carryovers (Aug -> Sep -> Oct -> etc.)
+    const breakdown: any[] = [];
+    let carryEndingDebt = 62152;
+    let carryRemaining = 14000;
+
+    sortedMonths.forEach((m, idx) => {
+      const summary: any = db.prepare('SELECT * FROM monthly_budget_summaries WHERE month = ?').get(m) || {};
+
+      // If first month, use manual or seed starting debt/prev remaining. Else carry over if not set.
+      const startingDebt = summary.starting_debt !== undefined && summary.starting_debt !== null && summary.starting_debt !== 0
+        ? summary.starting_debt
+        : (idx === 0 ? 62152 : carryEndingDebt);
+
+      const previousRemaining = summary.previous_remaining !== undefined && summary.previous_remaining !== null
+        ? summary.previous_remaining
+        : (idx === 0 ? 14000 : carryRemaining);
+
+      // Expenses
+      const expRows: any[] = db.prepare('SELECT category, SUM(amount) as total FROM expenses WHERE month = ? GROUP BY category').all(m);
+      let regExpense = 0;
+      let extExpense = 0;
+      expRows.forEach((r) => {
+        if (r.category === 'reg') regExpense = r.total || 0;
+        else extExpense += r.total || 0;
+      });
+      const totalExpense = regExpense + extExpense;
+
+      // Incomes
+      const incRows: any[] = db.prepare('SELECT category, SUM(amount) as total FROM income_entries WHERE month = ? GROUP BY category').all(m);
+      let salary = 0;
+      let freelance = 0;
+      let returns = 0;
+      let extIncome = 0;
+      incRows.forEach((r) => {
+        if (r.category === 'sal') salary = r.total || 0;
+        else if (r.category === 'fl') freelance = r.total || 0;
+        else if (r.category === 'rt') returns = r.total || 0;
+        else extIncome += r.total || 0;
+      });
+
+      // Returns from borrow_records (type = 'RETURN')
+      const borrowRetRow: any = db.prepare('SELECT SUM(amount) as total FROM borrow_records WHERE month = ? AND type = ?').get(m, 'RETURN');
+      if (borrowRetRow && borrowRetRow.total) {
+        returns = Math.max(returns, borrowRetRow.total);
+      }
+
+      // Borrows from borrow_records (type = 'BORROW')
+      const borrowRow: any = db.prepare('SELECT SUM(amount) as total FROM borrow_records WHERE month = ? AND type = ?').get(m, 'BORROW');
+      const autoBorrow = borrowRow && borrowRow.total ? borrowRow.total : 0;
+      const finalBorrow = summary.borrow_amount || autoBorrow;
+
+      // Inflow
+      const totalIncome = previousRemaining + salary + freelance + returns + extIncome;
+
+      // Savings
+      const regSavings = summary.reg_savings || 0;
+      const extSavings = summary.ext_savings || 0;
+
+      // Dept Payment
+      const deptPayment = summary.dept_payment || 0;
+
+      // Overhead = Total Income + Borrow - (Total Expense + Debt Payment)
+      const overhead = (totalIncome + finalBorrow) - (totalExpense + deptPayment);
+      const ovhSavings = overhead > 0 ? Math.round(overhead / 2) : 0;
+      const totalSavings = regSavings + extSavings + ovhSavings;
+      const remaining = overhead > 0 ? (overhead - ovhSavings) : 0;
+
+      // Deficit if expenses exceeded income
+      const deficit = totalExpense > totalIncome ? totalExpense - totalIncome : 0;
+      const endingDebt = (startingDebt - deptPayment) + finalBorrow + deficit;
+
+      // Update carryovers for next iteration
+      carryEndingDebt = endingDebt;
+      carryRemaining = remaining;
+
+      breakdown.push({
+        month: m,
+        starting_debt: startingDebt,
+        previous_remaining: previousRemaining,
+        salary,
+        freelance,
+        returns,
+        ext_income: extIncome,
+        total_income: totalIncome,
+        reg_savings: regSavings,
+        ext_savings: extSavings,
+        total_savings: totalSavings,
+        reg_expense: regExpense,
+        ext_expense: extExpense,
+        total_expense: totalExpense,
+        dept_payment: deptPayment,
+        borrow_amount: finalBorrow,
+        overhead,
+        ovh_savings: ovhSavings,
+        remaining,
+        ending_debt: endingDebt,
+        notes: summary.notes || '',
+      });
+    });
+
+    res.json(breakdown);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Add new month to tracker
+app.post('/api/budget/months', (req: Request, res: Response) => {
+  const { month } = req.body;
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    res.status(400).json({ error: 'Valid YYYY-MM month string is required' });
+    return;
+  }
+  try {
+    const existing = db.prepare('SELECT month FROM monthly_budget_summaries WHERE month = ?').get(month);
+    if (!existing) {
+      db.prepare(`
+        INSERT INTO monthly_budget_summaries (month, starting_debt, previous_remaining, dept_payment, borrow_amount, reg_savings, ext_savings, notes)
+        VALUES (?, 0, 0, 0, 0, 0, 0, 'New Planning Month')
+      `).run(month);
+    }
+    res.json({ success: true, month });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ----------------- BUSINESS CURRENT ACCOUNT & WITHDRAWALS API -----------------
+
+app.get('/api/budget/current-account', (_req: Request, res: Response) => {
+  try {
+    const invoices: any[] = db.prepare(`
+      SELECT i.*, o.name as org_name
+      FROM invoices i
+      LEFT JOIN organizations o ON i.organization_id = o.id
+      ORDER BY i.invoice_date DESC, i.created_at DESC
+    `).all();
+
+    let totalRevenuePaid = 0;
+    let unpaidReceivables = 0;
+
+    const paidInvoices: any[] = [];
+    const unpaidInvoices: any[] = [];
+
+    for (const inv of invoices) {
+      const isStatusPaid = (inv.status || '').toUpperCase() === 'PAID';
+      const amtPaid = Number(inv.amount_paid) || 0;
+      const totalAmt = Number(inv.total) || 0;
+      const effectivePaid = isStatusPaid ? (amtPaid > 0 ? amtPaid : totalAmt) : amtPaid;
+      const balanceDue = isStatusPaid ? 0 : (Number(inv.balance_due) > 0 ? Number(inv.balance_due) : Math.max(0, totalAmt - effectivePaid));
+
+      if (effectivePaid > 0) {
+        totalRevenuePaid += effectivePaid;
+        paidInvoices.push({
+          id: inv.id,
+          invoice_number: inv.invoice_number,
+          date: inv.invoice_date,
+          org_name: inv.org_name || 'Client',
+          amount_paid: effectivePaid,
+          total: totalAmt,
+          status: inv.status,
+        });
+      }
+
+      if (balanceDue > 0) {
+        unpaidReceivables += balanceDue;
+        unpaidInvoices.push({
+          id: inv.id,
+          invoice_number: inv.invoice_number,
+          date: inv.invoice_date,
+          org_name: inv.org_name || 'Client',
+          balance_due: balanceDue,
+          total: totalAmt,
+          status: inv.status,
+        });
+      }
+    }
+
+    const withdrawals: any[] = db.prepare(`
+      SELECT * FROM current_account_withdrawals
+      ORDER BY date DESC, created_at DESC
+    `).all();
+
+    const totalWithdrawn = withdrawals.reduce((sum, w) => sum + (Number(w.amount) || 0), 0);
+    const availableBalance = Math.max(0, totalRevenuePaid - totalWithdrawn);
+
+    res.json({
+      total_revenue_paid: totalRevenuePaid,
+      total_withdrawn: totalWithdrawn,
+      available_balance: availableBalance,
+      unpaid_receivables: unpaidReceivables,
+      paid_invoices: paidInvoices,
+      unpaid_invoices: unpaidInvoices,
+      withdrawals,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Withdraw funds from Current Account into Personal Freelance Income
+app.post('/api/budget/current-account/withdraw', (req: Request, res: Response) => {
+  const { date, amount, source, notes } = req.body;
+  const numAmount = Number(amount);
+
+  if (!numAmount || numAmount <= 0) {
+    res.status(400).json({ error: 'Withdrawal amount must be greater than ₹0.' });
+    return;
+  }
+
+  const withdrawDate = date || new Date().toISOString().substring(0, 10);
+  const withdrawMonth = withdrawDate.substring(0, 7);
+
+  try {
+    // 1. Calculate available balance
+    const invoices: any[] = db.prepare(`SELECT status, amount_paid, total FROM invoices`).all();
+    let totalRevenuePaid = 0;
+    for (const inv of invoices) {
+      const isStatusPaid = (inv.status || '').toUpperCase() === 'PAID';
+      const amtPaid = Number(inv.amount_paid) || 0;
+      const totalAmt = Number(inv.total) || 0;
+      const effectivePaid = isStatusPaid ? (amtPaid > 0 ? amtPaid : totalAmt) : amtPaid;
+      totalRevenuePaid += effectivePaid;
+    }
+
+    const totalWithdrawnRow: any = db.prepare(`SELECT SUM(amount) as sum FROM current_account_withdrawals`).get();
+    const currentTotalWithdrawn = totalWithdrawnRow?.sum || 0;
+    const availableBalance = Math.max(0, totalRevenuePaid - currentTotalWithdrawn);
+
+    if (numAmount > availableBalance) {
+      res.status(400).json({
+        error: `Cannot withdraw ₹${numAmount.toLocaleString('en-IN')}. Current Account available balance is ₹${availableBalance.toLocaleString('en-IN')}. Unpaid invoices cannot be withdrawn.`,
+      });
+      return;
+    }
+
+    const withdrawalId = `with-${Date.now()}`;
+    const incomeId = `inc-with-${Date.now()}`;
+    const incomeSource = source?.trim() || 'Current Account (Owner Draw)';
+    const withdrawalNotes = notes?.trim() || 'Owner draw from Current Account to freelance income';
+
+    const tx = db.transaction(() => {
+      // Record in current_account_withdrawals
+      db.prepare(`
+        INSERT INTO current_account_withdrawals (id, date, month, amount, notes, income_entry_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(withdrawalId, withdrawDate, withdrawMonth, numAmount, withdrawalNotes, incomeId);
+
+      // Record in income_entries as freelance income ('fl')
+      db.prepare(`
+        INSERT INTO income_entries (id, date, month, category, source, amount, notes)
+        VALUES (?, ?, ?, 'fl', ?, ?, ?)
+      `).run(incomeId, withdrawDate, withdrawMonth, incomeSource, numAmount, withdrawalNotes);
+    });
+
+    tx();
+
+    res.json({
+      success: true,
+      withdrawalId,
+      incomeId,
+      amount: numAmount,
+      available_balance: availableBalance - numAmount,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete a withdrawal (refunds back to Current Account balance)
+app.delete('/api/budget/current-account/withdraw/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const row: any = db.prepare('SELECT * FROM current_account_withdrawals WHERE id = ?').get(id);
+    if (!row) {
+      res.status(404).json({ error: 'Withdrawal record not found.' });
+      return;
+    }
+
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM current_account_withdrawals WHERE id = ?').run(id);
+      if (row.income_entry_id) {
+        db.prepare('DELETE FROM income_entries WHERE id = ?').run(row.income_entry_id);
+      }
+    });
+
+    tx();
+    res.json({ success: true, message: 'Withdrawal deleted and balance returned to Current Account.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ----------------- EXPENSES API -----------------
+
+app.get('/api/budget/expenses', (req: Request, res: Response) => {
+  const { month, category, search } = req.query;
+  try {
+    let query = 'SELECT * FROM expenses WHERE 1=1';
+    const params: any[] = [];
+
+    if (month) {
+      query += ' AND month = ?';
+      params.push(month);
+    }
+    if (category && category !== 'all') {
+      query += ' AND category = ?';
+      params.push(category);
+    }
+    if (search) {
+      query += ' AND (description LIKE ? OR tag LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    query += ' ORDER BY date DESC, created_at DESC';
+    const rows = db.prepare(query).all(...params);
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/budget/expenses', (req: Request, res: Response) => {
+  const body = req.body;
+  const id = body.id || `exp-${Date.now()}`;
+  const date = body.date || new Date().toISOString().split('T')[0];
+  const month = body.month || date.substring(0, 7);
+
+  try {
+    const taxClass = body.tax_classification || (
+      ['Food', 'Groceries', 'Personal', 'Shopping', 'Cosmetics'].includes(body.tag)
+        ? 'PERSONAL_DRAWINGS'
+        : ['Gadgets', 'Equipment'].includes(body.tag)
+        ? 'CAPITAL_ASSET'
+        : ['Fuel', 'Travel', 'Recharge', 'Internet'].includes(body.tag)
+        ? 'MIXED_APPORTIONED'
+        : 'BUSINESS_DEDUCTIBLE'
+    );
+    const busPct = body.business_percentage !== undefined ? Number(body.business_percentage) : (taxClass === 'MIXED_APPORTIONED' ? 70 : 100);
+
+    db.prepare(`
+      INSERT INTO expenses (id, date, month, category, tag, description, amount, payment_method, notes, tax_classification, business_percentage, gst_rate, gst_itc_eligible, has_invoice_voucher, voucher_ref)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      date,
+      month,
+      body.category || 'ext',
+      body.tag || 'General',
+      body.description || 'Expense',
+      Number(body.amount) || 0,
+      body.payment_method || 'UPI / Bank',
+      body.notes || '',
+      taxClass,
+      busPct,
+      Number(body.gst_rate) || 0,
+      body.gst_itc_eligible ? 1 : 0,
+      body.has_invoice_voucher !== undefined ? (body.has_invoice_voucher ? 1 : 0) : 1,
+      body.voucher_ref || ''
+    );
+    res.json({ success: true, id });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/budget/expenses/:id', (req: Request, res: Response) => {
+  const body = req.body;
+  const date = body.date || new Date().toISOString().split('T')[0];
+  const month = body.month || date.substring(0, 7);
+
+  try {
+    db.prepare(`
+      UPDATE expenses SET
+        date = ?,
+        month = ?,
+        category = ?,
+        tag = ?,
+        description = ?,
+        amount = ?,
+        payment_method = ?,
+        notes = ?,
+        tax_classification = COALESCE(?, tax_classification),
+        business_percentage = COALESCE(?, business_percentage),
+        gst_rate = COALESCE(?, gst_rate),
+        gst_itc_eligible = COALESCE(?, gst_itc_eligible),
+        has_invoice_voucher = COALESCE(?, has_invoice_voucher),
+        voucher_ref = COALESCE(?, voucher_ref)
+      WHERE id = ?
+    `).run(
+      date,
+      month,
+      body.category || 'ext',
+      body.tag || 'General',
+      body.description,
+      Number(body.amount) || 0,
+      body.payment_method || 'UPI / Bank',
+      body.notes || '',
+      body.tax_classification,
+      body.business_percentage !== undefined ? Number(body.business_percentage) : null,
+      body.gst_rate !== undefined ? Number(body.gst_rate) : null,
+      body.gst_itc_eligible !== undefined ? (body.gst_itc_eligible ? 1 : 0) : null,
+      body.has_invoice_voucher !== undefined ? (body.has_invoice_voucher ? 1 : 0) : null,
+      body.voucher_ref !== undefined ? body.voucher_ref : null,
+      req.params.id
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/budget/expenses/:id', (req: Request, res: Response) => {
+  try {
+    db.prepare('DELETE FROM expenses WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ----------------- INCOME ENTRIES API -----------------
+
+app.get('/api/budget/income', (req: Request, res: Response) => {
+  const { month } = req.query;
+  try {
+    let query = 'SELECT * FROM income_entries WHERE 1=1';
+    const params: any[] = [];
+    if (month) {
+      query += ' AND month = ?';
+      params.push(month);
+    }
+    query += ' ORDER BY date DESC, created_at DESC';
+    const rows = db.prepare(query).all(...params);
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/budget/income', (req: Request, res: Response) => {
+  const body = req.body;
+  const id = body.id || `inc-${Date.now()}`;
+  const date = body.date || new Date().toISOString().split('T')[0];
+  const month = body.month || date.substring(0, 7);
+
+  try {
+    db.prepare(`
+      INSERT INTO income_entries (id, date, month, category, source, amount, invoice_id, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      date,
+      month,
+      body.category || 'fl',
+      body.source || 'Client',
+      Number(body.amount) || 0,
+      body.invoice_id || null,
+      body.notes || ''
+    );
+    res.json({ success: true, id });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/budget/income/:id', (req: Request, res: Response) => {
+  const body = req.body;
+  try {
+    const existing: any = db.prepare('SELECT * FROM income_entries WHERE id = ?').get(req.params.id);
+    if (!existing) {
+      return res.status(404).json({ error: 'Income entry not found' });
+    }
+    const date = body.date || existing.date;
+    const month = body.month || (date ? date.substring(0, 7) : existing.month);
+    const category = body.category || existing.category;
+    const source = body.source !== undefined ? body.source.trim() : existing.source;
+    const amount = body.amount !== undefined ? Number(body.amount) : existing.amount;
+    const notes = body.notes !== undefined ? body.notes.trim() : existing.notes;
+
+    db.prepare(`
+      UPDATE income_entries SET
+        date = ?,
+        month = ?,
+        category = ?,
+        source = ?,
+        amount = ?,
+        notes = ?
+      WHERE id = ?
+    `).run(
+      date,
+      month,
+      category,
+      source,
+      amount,
+      notes || '',
+      req.params.id
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/budget/income/:id', (req: Request, res: Response) => {
+  try {
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM current_account_withdrawals WHERE income_entry_id = ?').run(req.params.id);
+      db.prepare('DELETE FROM income_entries WHERE id = ?').run(req.params.id);
+    });
+    tx();
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ----------------- BORROW & RETURNS API -----------------
+
+app.get('/api/budget/borrow', (req: Request, res: Response) => {
+  const { month } = req.query;
+  try {
+    let query = 'SELECT * FROM borrow_records WHERE 1=1';
+    const params: any[] = [];
+    if (month) {
+      query += ' AND month = ?';
+      params.push(month);
+    }
+    query += ' ORDER BY date DESC, created_at DESC';
+    const rows = db.prepare(query).all(...params);
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/budget/borrow', (req: Request, res: Response) => {
+  const body = req.body;
+  const id = body.id || `br-${Date.now()}`;
+  const date = body.date || new Date().toISOString().split('T')[0];
+  const month = body.month || date.substring(0, 7);
+
+  try {
+    db.prepare(`
+      INSERT INTO borrow_records (id, date, month, type, person, reason, amount, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      date,
+      month,
+      body.type || 'BORROW',
+      body.person || 'Person',
+      body.reason || '',
+      Number(body.amount) || 0,
+      body.status || 'PENDING'
+    );
+    res.json({ success: true, id });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/budget/borrow/:id', (req: Request, res: Response) => {
+  const body = req.body;
+  try {
+    const existing: any = db.prepare('SELECT * FROM borrow_records WHERE id = ?').get(req.params.id);
+    if (!existing) {
+      return res.status(404).json({ error: 'Borrow record not found' });
+    }
+    const date = body.date || existing.date;
+    const month = body.month || (date ? date.substring(0, 7) : existing.month);
+    const type = body.type || existing.type;
+    const person = body.person !== undefined ? body.person.trim() : existing.person;
+    const reason = body.reason !== undefined ? body.reason.trim() : existing.reason;
+    const amount = body.amount !== undefined ? Number(body.amount) : existing.amount;
+    const status = body.status !== undefined ? body.status : existing.status;
+
+    db.prepare(`
+      UPDATE borrow_records SET
+        date = ?,
+        month = ?,
+        type = ?,
+        person = ?,
+        reason = ?,
+        amount = ?,
+        status = ?
+      WHERE id = ?
+    `).run(
+      date,
+      month,
+      type,
+      person,
+      reason || '',
+      amount,
+      status,
+      req.params.id
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/budget/borrow/:id', (req: Request, res: Response) => {
+  try {
+    db.prepare('DELETE FROM borrow_records WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ----------------- FINANCIAL GOALS API -----------------
+
+app.get('/api/budget/goals', (_req: Request, res: Response) => {
+  try {
+    const rows: any[] = db.prepare('SELECT * FROM financial_goals ORDER BY target_amount ASC').all();
+    const formatted = rows.map((g) => ({
+      ...g,
+      remaining: Math.max(0, g.target_amount - g.saved_amount),
+      progress_percent: g.target_amount > 0 ? Math.min(100, Math.round((g.saved_amount / g.target_amount) * 100)) : 0,
+    }));
+    res.json(formatted);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/budget/goals', (req: Request, res: Response) => {
+  const body = req.body;
+  const id = body.id || `goal-${Date.now()}`;
+  try {
+    db.prepare(`
+      INSERT INTO financial_goals (id, name, target_amount, savings_percent, saved_amount, target_date, status, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      body.name,
+      Number(body.target_amount) || 0,
+      Number(body.savings_percent) || 0,
+      Number(body.saved_amount) || 0,
+      body.target_date || null,
+      body.status || 'IN_PROGRESS',
+      body.notes || ''
+    );
+    res.json({ success: true, id });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/budget/goals/:id', (req: Request, res: Response) => {
+  const body = req.body;
+  try {
+    db.prepare(`
+      UPDATE financial_goals SET
+        name = ?,
+        target_amount = ?,
+        savings_percent = ?,
+        saved_amount = ?,
+        target_date = ?,
+        status = ?,
+        notes = ?
+      WHERE id = ?
+    `).run(
+      body.name,
+      Number(body.target_amount) || 0,
+      Number(body.savings_percent) || 0,
+      Number(body.saved_amount) || 0,
+      body.target_date || null,
+      body.status || 'IN_PROGRESS',
+      body.notes || '',
+      req.params.id
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/budget/goals/:id', (req: Request, res: Response) => {
+  try {
+    db.prepare('DELETE FROM financial_goals WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ----------------- BUDGET ALLOCATIONS (Planned vs Actual) -----------------
+
+app.get('/api/budget/allocations', (req: Request, res: Response) => {
+  const month = (req.query.month as string) || new Date().toISOString().substring(0, 7);
+  try {
+    // Get total income for month consistent with summary
+    const incRows: any[] = db.prepare('SELECT category, SUM(amount) as total FROM income_entries WHERE month = ? GROUP BY category').all(month);
+    let incSum = 0;
+    let rtFromInc = 0;
+    incRows.forEach((r) => {
+      incSum += r.total || 0;
+      if (r.category === 'rt') rtFromInc = r.total || 0;
+    });
+
+    const borrowRetRow: any = db
+      .prepare('SELECT SUM(amount) as total FROM borrow_records WHERE month = ? AND type = ?')
+      .get(month, 'RETURN');
+    const rtFromBorrow = borrowRetRow?.total || 0;
+    const returnsToAdd = Math.max(0, rtFromBorrow - rtFromInc);
+
+    const totalIncomeEarned = incSum + returnsToAdd;
+    const sumRow: any = db.prepare('SELECT previous_remaining FROM monthly_budget_summaries WHERE month = ?').get(month);
+    const previousRemaining = sumRow?.previous_remaining || 0;
+    const totalIncome = totalIncomeEarned + previousRemaining;
+
+    const rules: any[] = db.prepare('SELECT * FROM budget_allocation_rules ORDER BY display_order ASC').all();
+    const expenses: any[] = db.prepare('SELECT tag, category, SUM(amount) as spent FROM expenses WHERE month = ? GROUP BY tag, category').all(month);
+
+    // Map rules to actual spending
+    const allocations = rules.map((r) => {
+      const planned = Math.round(totalIncome * r.percentage);
+      let actual = 0;
+
+      if (r.category === 'Essentials') {
+        // Reg expenses or tags like groceries, fuel, recharge, utility
+        const match = expenses.find((e) => e.category === 'reg');
+        actual = match ? match.spent : 0;
+      } else if (r.category === 'Small Assets') {
+        const match = expenses.find((e) => e.tag === 'Gadgets' || e.tag === 'Accessories');
+        actual = match ? match.spent : 0;
+      } else if (r.category === 'Business Growth') {
+        const match = expenses.find((e) => e.tag === 'Services' || e.tag === 'Hosting' || e.tag === 'Tools');
+        actual = match ? match.spent : 0;
+      }
+
+      return {
+        ...r,
+        planned_amount: planned,
+        actual_spent: actual,
+        variance: planned - actual,
+      };
+    });
+
+    res.json({
+      month,
+      total_income: totalIncome,
+      allocations,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ----------------- INDIAN TAX & COMPLIANCE APIS -----------------
+
+function calculateNewRegimeTax(taxableIncome: number): number {
+  if (taxableIncome <= 300000) return 0;
+  let tax = 0;
+  if (taxableIncome <= 700000) {
+    tax = (taxableIncome - 300000) * 0.05;
+  } else if (taxableIncome <= 1000000) {
+    tax = 20000 + (taxableIncome - 700000) * 0.10;
+  } else if (taxableIncome <= 1200000) {
+    tax = 50000 + (taxableIncome - 1000000) * 0.15;
+  } else if (taxableIncome <= 1500000) {
+    tax = 80000 + (taxableIncome - 1200000) * 0.20;
+  } else {
+    tax = 140000 + (taxableIncome - 1500000) * 0.30;
+  }
+  // Section 87A rebate for net taxable income <= ₹7,00,000 (FY 2024-25/25-26)
+  if (taxableIncome <= 700000) {
+    tax = 0;
+  }
+  return Math.round(tax * 1.04);
+}
+
+function calculateOldRegimeTax(taxableIncome: number): number {
+  if (taxableIncome <= 250000) return 0;
+  let tax = 0;
+  if (taxableIncome <= 500000) {
+    tax = (taxableIncome - 250000) * 0.05;
+  } else if (taxableIncome <= 1000000) {
+    tax = 12500 + (taxableIncome - 500000) * 0.20;
+  } else {
+    tax = 112500 + (taxableIncome - 1000000) * 0.30;
+  }
+  // Section 87A rebate up to ₹5,00,000
+  if (taxableIncome <= 500000) {
+    tax = 0;
+  }
+  return Math.round(tax * 1.04);
+}
+
+// GET Tax Summary
+app.get('/api/tax/summary', (_req: Request, res: Response) => {
+  try {
+    // 1. Turnover from Invoices & Income
+    const invStats: any = db.prepare(`
+      SELECT 
+        COALESCE(SUM(total), 0) as gross_turnover,
+        COALESCE(SUM(amount_paid), 0) as total_collections,
+        COUNT(*) as invoices_count
+      FROM invoices 
+      WHERE status != 'cancelled'
+    `).get();
+
+    const incStats: any = db.prepare(`
+      SELECT COALESCE(SUM(amount), 0) as total_income
+      FROM income_entries
+      WHERE category IN ('fl', 'sal', 'ext')
+    `).get();
+
+    // Use max of invoices total and recorded income to prevent under-reporting
+    const grossTurnover = Math.max(invStats.gross_turnover || 0, incStats.total_income || 0);
+    const totalCollections = invStats.total_collections || 0;
+    const totalInvoicesCount = invStats.invoices_count || 0;
+
+    // 2. Expenses breakdown
+    const expenses: any[] = db.prepare('SELECT * FROM expenses').all();
+
+    let businessDeductibleExpenses = 0;
+    let personalDrawings = 0;
+    let mixedExpensesTotal = 0;
+    let mixedExpensesDeductible = 0;
+    let capitalAssetsTotal = 0;
+    let capitalIntroduced = 0;
+    let bankChargesDeductible = 0;
+    let totalCashWithdrawals = 0;
+
+    const violations: any[] = [];
+
+    expenses.forEach((e) => {
+      const amt = Number(e.amount) || 0;
+      const isCash = (e.payment_method || '').toLowerCase().includes('cash');
+
+      if (isCash) {
+        totalCashWithdrawals += amt;
+      }
+
+      // Check Section 40A(3) Cash Disallowance (> ₹10,000 cash in a single payment)
+      if (isCash && amt > 10000 && e.tax_classification === 'BUSINESS_DEDUCTIBLE') {
+        violations.push({
+          id: `viol-40a3-${e.id}`,
+          date: e.date,
+          description: e.description,
+          amount: amt,
+          ruleCode: 'SEC_40A3',
+          ruleTitle: 'Section 40A(3) Cash Payment Limit Violation',
+          severity: 'DANGER',
+          suggestion: `Payment of ₹${amt.toLocaleString('en-IN')} was made in cash exceeding the statutory ₹10,000 threshold. Under Income Tax Section 40A(3), this entire expense is 100% disallowed from business deductions. Switch to UPI, NEFT, or account payee cheque.`,
+        });
+      }
+
+      // Check Section 17(5) Blocked ITC
+      const isBlockedTag = ['Food', 'Dining', 'Personal', 'Fuel', 'Cosmetics', 'Entertainment'].includes(e.tag);
+      if (Boolean(e.gst_itc_eligible) && isBlockedTag) {
+        violations.push({
+          id: `viol-17-5-${e.id}`,
+          date: e.date,
+          description: e.description,
+          amount: amt,
+          ruleCode: 'SEC_17_5',
+          ruleTitle: 'Section 17(5) Blocked Input Tax Credit (ITC)',
+          severity: 'DANGER',
+          suggestion: `Input Tax Credit claimed on "${e.tag || e.description}". Section 17(5) of CGST Act strictly blocks ITC on food, catering, motor fuel, club memberships, and personal goods. Claiming this invites GST audit notices.`,
+        });
+      }
+
+      // Check Drawings misclassified as Business Expense
+      if (['Food', 'Groceries', 'Cosmetics', 'Personal', 'Shopping'].includes(e.tag) && e.tax_classification === 'BUSINESS_DEDUCTIBLE') {
+        violations.push({
+          id: `viol-draw-${e.id}`,
+          date: e.date,
+          description: e.description,
+          amount: amt,
+          ruleCode: 'DRAWINGS_AS_EXPENSE',
+          ruleTitle: 'Personal Drawings Claimed as Business Expense',
+          severity: 'WARNING',
+          suggestion: `"${e.description}" appears to be a personal lifestyle expense. Claiming personal spending as business deduction violates Section 37(1) (Wholly & Exclusively rule) and invites Section 270A penalties (up to 200% of tax evaded). Reclassify as "Personal Drawings".`,
+        });
+      }
+
+      // Check Missing Voucher on larger business expenses
+      if (amt >= 2000 && !e.has_invoice_voucher && e.tax_classification === 'BUSINESS_DEDUCTIBLE') {
+        violations.push({
+          id: `viol-vouch-${e.id}`,
+          date: e.date,
+          description: e.description,
+          amount: amt,
+          ruleCode: 'MISSING_VOUCHER',
+          ruleTitle: 'Missing Tax Invoice / Proof Voucher',
+          severity: 'WARNING',
+          suggestion: `Business deduction of ₹${amt.toLocaleString('en-IN')} lacks a supporting invoice/voucher. In case of scrutiny under Section 143(3), unvouched expenses are routinely disallowed.`,
+        });
+      }
+
+      // Calculate totals based on classification
+      if (e.tax_classification === 'BUSINESS_DEDUCTIBLE') {
+        businessDeductibleExpenses += amt;
+        const desc = (e.description || '').toLowerCase();
+        const tag = (e.tag || '').toLowerCase();
+        if (['bank', 'sbi', 'mab', 'charge', 'fee', 'amc', 'sms'].some(k => desc.includes(k) || tag.includes(k))) {
+          bankChargesDeductible += amt;
+        }
+      } else if (e.tax_classification === 'PERSONAL_DRAWINGS') {
+        personalDrawings += amt;
+      } else if (e.tax_classification === 'CAPITAL_INTRODUCED') {
+        capitalIntroduced += amt;
+      } else if (e.tax_classification === 'MIXED_APPORTIONED') {
+        mixedExpensesTotal += amt;
+        const busPct = e.business_percentage !== undefined ? Number(e.business_percentage) : 70;
+        const deductiblePart = (amt * busPct) / 100;
+        mixedExpensesDeductible += deductiblePart;
+        personalDrawings += (amt - deductiblePart); // Non-business part becomes drawings
+      } else if (e.tax_classification === 'CAPITAL_ASSET') {
+        capitalAssetsTotal += amt;
+      } else {
+        // Default treat as business deductible
+        businessDeductibleExpenses += amt;
+      }
+    });
+
+    // 40% depreciation allowed on IT equipment / computers under Section 32
+    const capitalAssetDepreciation = capitalAssetsTotal * 0.40;
+    const totalDeductionsAllowed = Math.round(businessDeductibleExpenses + mixedExpensesDeductible + capitalAssetDepreciation);
+    const netActualProfit = Math.max(0, grossTurnover - totalDeductionsAllowed);
+    const profitMarginActual = grossTurnover > 0 ? Math.round((netActualProfit / grossTurnover) * 100) : 0;
+
+    // Presumptive Profit Calculations
+    // Section 44ADA: 50% deemed profit for specified professionals / software freelancers
+    const presumptive44ADAProfit = Math.round(grossTurnover * 0.50);
+    // Section 44AD: 6% deemed profit for digital business receipts
+    const presumptive44ADProfit = Math.round(grossTurnover * 0.06);
+
+    // SFT Cash Limits
+    const cashIncomeRow: any = db.prepare("SELECT COALESCE(SUM(amount), 0) as cash_in FROM income_entries WHERE notes LIKE '%cash%' OR source LIKE '%cash%'").get();
+    const totalCashDeposits = cashIncomeRow.cash_in || 0;
+    const sftLimitCurrentAccount = 5000000; // ₹50 Lakhs limit for current accounts under Rule 114E
+    const sftCashUtilizationPercent = Math.min(100, Math.round(((totalCashDeposits + totalCashWithdrawals) / sftLimitCurrentAccount) * 100));
+
+    if ((totalCashDeposits + totalCashWithdrawals) > 1000000) {
+      violations.push({
+        id: 'viol-sft-threshold',
+        date: new Date().toISOString().split('T')[0],
+        description: `Aggregate cash turnover: ₹${(totalCashDeposits + totalCashWithdrawals).toLocaleString('en-IN')}`,
+        amount: totalCashDeposits + totalCashWithdrawals,
+        ruleCode: 'SFT_CASH',
+        ruleTitle: 'High Cash Velocity in Current Account',
+        severity: (totalCashDeposits + totalCashWithdrawals) >= 4000000 ? 'DANGER' : 'WARNING',
+        suggestion: `Your SBI Current Account cash volume is tracked by the IT Department's AIS (Annual Information Statement). Aggregate cash deposits/withdrawals exceeding ₹50,00,000 are mandatorily reported under SFT-005. Maintain strict digital payment hygiene.`,
+      });
+    }
+
+    // Tax Health / Compliance Score
+    let score = 100;
+    violations.forEach((v) => {
+      if (v.severity === 'DANGER') score -= 15;
+      else score -= 8;
+    });
+    const complianceScore = Math.max(25, Math.min(100, score));
+
+    // Tax calculations (comparing actual profit vs 44ADA profit)
+    const taxableBase = presumptive44ADAProfit > 0 ? presumptive44ADAProfit : netActualProfit;
+    const taxLiabilityNewRegime = calculateNewRegimeTax(taxableBase);
+    const taxLiabilityOldRegime = calculateOldRegimeTax(taxableBase);
+
+    // Advance Tax Installment Schedule
+    const taxToPay = taxLiabilityNewRegime;
+    const advanceTaxSchedule = [
+      {
+        quarter: 'Q1 (15%)',
+        dueDate: '15 June',
+        percentage: 15,
+        amountDue: Math.round(taxToPay * 0.15),
+        status: 'PAID' as const,
+        description: 'First installment under Section 208/211 (Exempt if opting for Section 44ADA)',
+      },
+      {
+        quarter: 'Q2 (45%)',
+        dueDate: '15 September',
+        percentage: 45,
+        amountDue: Math.round(taxToPay * 0.45),
+        status: 'PAID' as const,
+        description: 'Cumulative 45% of estimated annual tax liability',
+      },
+      {
+        quarter: 'Q3 (75%)',
+        dueDate: '15 December',
+        percentage: 75,
+        amountDue: Math.round(taxToPay * 0.75),
+        status: 'UPCOMING' as const,
+        description: 'Cumulative 75% of estimated tax liability',
+      },
+      {
+        quarter: 'Q4 (100% / 44ADA)',
+        dueDate: '15 March',
+        percentage: 100,
+        amountDue: taxToPay,
+        status: 'UPCOMING' as const,
+        description: 'Full 100% tax liability due. Single installment deadline for Section 44ADA / 44AD filers!',
+      },
+    ];
+
+    res.json({
+      financialYear: '2026-27 (FY)',
+      assessmentYear: '2027-28 (AY)',
+      grossTurnover,
+      totalInvoicesCount,
+      totalCollections,
+      businessDeductibleExpenses,
+      personalDrawings,
+      mixedExpensesTotal,
+      mixedExpensesDeductible,
+      capitalAssetsTotal,
+      capitalIntroduced,
+      bankChargesDeductible,
+      sbiMabRequired: 5000,
+      sbiMabStatus: 'COMPLIANT' as const,
+      totalDeductionsAllowed,
+      netActualProfit,
+      profitMarginActual,
+      presumptive44ADAProfit,
+      presumptive44ADProfit,
+      totalCashDeposits,
+      totalCashWithdrawals,
+      sftLimitCurrentAccount,
+      sftCashUtilizationPercent,
+      violations,
+      complianceScore,
+      taxLiabilityNewRegime,
+      taxLiabilityOldRegime,
+      advanceTaxSchedule,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ----------------- TAX REMINDERS APIS -----------------
+
+app.get('/api/tax/reminders', (_req: Request, res: Response) => {
+  try {
+    const reminders = db.prepare('SELECT * FROM tax_reminders ORDER BY due_date ASC').all();
+    res.json(
+      reminders.map((r: any) => ({
+        ...r,
+        is_recurring: Boolean(r.is_recurring),
+        is_completed: Boolean(r.is_completed),
+      }))
+    );
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/tax/reminders', (req: Request, res: Response) => {
+  const body = req.body;
+  const id = body.id || `rem-${Date.now()}`;
+  try {
+    db.prepare(`
+      INSERT INTO tax_reminders (id, title, description, due_date, category, is_recurring, frequency, is_completed, notify_before_days, priority, penalty_note, action_url)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      body.title,
+      body.description || '',
+      body.due_date,
+      body.category || 'CUSTOM',
+      body.is_recurring ? 1 : 0,
+      body.frequency || 'ONCE',
+      body.is_completed ? 1 : 0,
+      body.notify_before_days || 7,
+      body.priority || 'HIGH',
+      body.penalty_note || '',
+      body.action_url || ''
+    );
+    res.json({ success: true, id });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/tax/reminders/:id', (req: Request, res: Response) => {
+  const body = req.body;
+  try {
+    const completedAt = body.is_completed ? new Date().toISOString() : null;
+    db.prepare(`
+      UPDATE tax_reminders SET
+        title = COALESCE(?, title),
+        description = COALESCE(?, description),
+        due_date = COALESCE(?, due_date),
+        category = COALESCE(?, category),
+        is_recurring = COALESCE(?, is_recurring),
+        frequency = COALESCE(?, frequency),
+        is_completed = COALESCE(?, is_completed),
+        completed_at = ?,
+        notify_before_days = COALESCE(?, notify_before_days),
+        priority = COALESCE(?, priority),
+        penalty_note = COALESCE(?, penalty_note),
+        action_url = COALESCE(?, action_url)
+      WHERE id = ?
+    `).run(
+      body.title,
+      body.description,
+      body.due_date,
+      body.category,
+      body.is_recurring !== undefined ? (body.is_recurring ? 1 : 0) : null,
+      body.frequency,
+      body.is_completed !== undefined ? (body.is_completed ? 1 : 0) : null,
+      completedAt,
+      body.notify_before_days,
+      body.priority,
+      body.penalty_note,
+      body.action_url,
+      req.params.id
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/tax/reminders/:id', (req: Request, res: Response) => {
+  try {
+    db.prepare('DELETE FROM tax_reminders WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Single expense classify endpoint
+app.post('/api/tax/expenses/:id/classify', (req: Request, res: Response) => {
+  const { tax_classification, business_percentage, gst_rate, gst_itc_eligible, has_invoice_voucher, voucher_ref } = req.body;
+  try {
+    db.prepare(`
+      UPDATE expenses SET
+        tax_classification = COALESCE(?, tax_classification),
+        business_percentage = COALESCE(?, business_percentage),
+        gst_rate = COALESCE(?, gst_rate),
+        gst_itc_eligible = COALESCE(?, gst_itc_eligible),
+        has_invoice_voucher = COALESCE(?, has_invoice_voucher),
+        voucher_ref = COALESCE(?, voucher_ref)
+      WHERE id = ?
+    `).run(
+      tax_classification,
+      business_percentage !== undefined ? Number(business_percentage) : null,
+      gst_rate !== undefined ? Number(gst_rate) : null,
+      gst_itc_eligible !== undefined ? (gst_itc_eligible ? 1 : 0) : null,
+      has_invoice_voucher !== undefined ? (has_invoice_voucher ? 1 : 0) : null,
+      voucher_ref !== undefined ? voucher_ref : null,
+      req.params.id
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Bulk auto-classify expenses based on intelligent heuristics
+app.post('/api/tax/expenses/auto-classify', (_req: Request, res: Response) => {
+  try {
+    const expenses: any[] = db.prepare('SELECT id, tag, description, payment_method, amount FROM expenses').all();
+    let updatedCount = 0;
+
+    const updateStmt = db.prepare(`
+      UPDATE expenses SET
+        tax_classification = ?,
+        business_percentage = ?,
+        gst_itc_eligible = ?
+      WHERE id = ?
+    `);
+
+    expenses.forEach((e) => {
+      let classification = 'BUSINESS_DEDUCTIBLE';
+      let busPct = 100;
+      let itcEligible = 0;
+
+      const desc = (e.description || '').toLowerCase();
+      const tag = (e.tag || '').toLowerCase();
+
+      if (['capital', 'funds transfer', 'savings to current', 'owner equity', 'self transfer', 'personal savings'].some(k => tag.includes(k) || desc.includes(k))) {
+        classification = 'CAPITAL_INTRODUCED';
+        busPct = 0;
+        itcEligible = 0;
+      } else if (['bank charge', 'sbi fee', 'mab', 'sms alert', 'debit card amc', 'cheque'].some(k => tag.includes(k) || desc.includes(k))) {
+        classification = 'BUSINESS_DEDUCTIBLE';
+        busPct = 100;
+        itcEligible = 0;
+      } else if (['food', 'dining', 'groceries', 'cinema', 'personal', 'cosmetics', 'shopping', 'medicine'].some(k => tag.includes(k) || desc.includes(k))) {
+        classification = 'PERSONAL_DRAWINGS';
+        busPct = 0;
+        itcEligible = 0;
+      } else if (['fuel', 'travel', 'recharge', 'internet', 'mobile', 'broadband', 'wifi'].some(k => tag.includes(k) || desc.includes(k))) {
+        classification = 'MIXED_APPORTIONED';
+        busPct = 70;
+        itcEligible = 0;
+      } else if (['gadget', 'laptop', 'hardware', 'equipment', 'phone', 'computer'].some(k => tag.includes(k) || desc.includes(k))) {
+        classification = 'CAPITAL_ASSET';
+        busPct = 100;
+        itcEligible = 1;
+      } else {
+        classification = 'BUSINESS_DEDUCTIBLE';
+        busPct = 100;
+        itcEligible = 1;
+      }
+
+      updateStmt.run(classification, busPct, itcEligible, e.id);
+      updatedCount++;
+    });
+
+    res.json({ success: true, count: updatedCount });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ----------------- SBI CURRENT ACCOUNT ENHANCEMENTS -----------------
+
+// SBI PPS Cheques: List
+app.get('/api/tax/sbi/pps-cheques', (_req: Request, res: Response) => {
+  try {
+    const cheques = db.prepare('SELECT * FROM sbi_pps_cheques ORDER BY issue_date DESC, created_at DESC').all();
+    res.json(cheques);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// SBI PPS Cheques: Add
+app.post('/api/tax/sbi/pps-cheques', (req: Request, res: Response) => {
+  const { cheque_number, payee_name, amount, issue_date, notes } = req.body;
+  if (!cheque_number || !payee_name || !amount || !issue_date) {
+    res.status(400).json({ error: 'cheque_number, payee_name, amount, and issue_date are required' });
+    return;
+  }
+  const id = `pps-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+  try {
+    db.prepare(`
+      INSERT INTO sbi_pps_cheques (id, cheque_number, payee_name, amount, issue_date, account_number, pps_status, notes)
+      VALUES (?, ?, ?, ?, ?, '45661497562', 'PENDING_REGISTRATION', ?)
+    `).run(id, String(cheque_number), payee_name, Number(amount), issue_date, notes || null);
+    const created = db.prepare('SELECT * FROM sbi_pps_cheques WHERE id = ?').get(id);
+    res.status(201).json(created);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// SBI PPS Cheques: Update Status / Ref
+app.put('/api/tax/sbi/pps-cheques/:id', (req: Request, res: Response) => {
+  const { pps_status, pps_reference, notes } = req.body;
+  try {
+    db.prepare(`
+      UPDATE sbi_pps_cheques SET
+        pps_status = COALESCE(?, pps_status),
+        pps_reference = COALESCE(?, pps_reference),
+        notes = COALESCE(?, notes)
+      WHERE id = ?
+    `).run(pps_status, pps_reference, notes, req.params.id);
+    const updated = db.prepare('SELECT * FROM sbi_pps_cheques WHERE id = ?').get(req.params.id);
+    res.json(updated);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// SBI PPS Cheques: Delete
+app.delete('/api/tax/sbi/pps-cheques/:id', (req: Request, res: Response) => {
+  try {
+    db.prepare('DELETE FROM sbi_pps_cheques WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Quick-Log SBI Bank Charges (100% Tax Deductible u/s 37(1))
+app.post('/api/tax/sbi/quick-bank-charge', (req: Request, res: Response) => {
+  const { chargeType, customAmount, notes } = req.body;
+  
+  let desc = 'SBI Bank Service Charges';
+  let amt = 0;
+
+  switch (chargeType) {
+    case 'DEBIT_CARD_AMC':
+      desc = 'SBI Pride Business Debit Card AMC (₹350 + 18% GST)';
+      amt = customAmount ? Number(customAmount) : 413;
+      break;
+    case 'SMS_ALERT':
+      desc = 'SBI Current Account Quarterly SMS Alert Fee (₹15 + 18% GST)';
+      amt = customAmount ? Number(customAmount) : 17.70;
+      break;
+    case 'MAB_SHORTFALL':
+      desc = 'SBI Semi-Urban MAB Non-Maintenance Fee (₹500 + 18% GST)';
+      amt = customAmount ? Number(customAmount) : 590;
+      break;
+    case 'CHEQUE_BOOK':
+      desc = 'SBI Current Account Cheque Book Charges (25 Leaves + GST)';
+      amt = customAmount ? Number(customAmount) : 177;
+      break;
+    default:
+      desc = notes || 'SBI Current Account Charges u/s 37(1)';
+      amt = Number(customAmount || 100);
+      break;
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const month = today.slice(0, 7);
+  const id = `exp-sbi-${Date.now()}`;
+
+  try {
+    db.prepare(`
+      INSERT INTO expenses (
+        id, date, month, category, tag, description, amount, payment_method,
+        tax_classification, business_percentage, gst_rate, gst_itc_eligible,
+        has_invoice_voucher, voucher_ref, notes
+      ) VALUES (?, ?, ?, 'reg', 'Bank Charges', ?, ?, 'SBI Current Account', 'BUSINESS_DEDUCTIBLE', 100, 18, 0, 1, 'SBI-CHAKULIA-DEBIT', ?)
+    `).run(id, today, month, desc, amt, notes || 'Auto-logged SBI statutory bank charges - 100% deductible under Section 37(1)');
+
+    res.json({ success: true, id, description: desc, amount: amt });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Batch Import SBI Statement Items (Expenses & Capital Introduced)
+app.post('/api/tax/sbi/batch-import', (req: Request, res: Response) => {
+  const { transactions } = req.body;
+  if (!Array.isArray(transactions) || transactions.length === 0) {
+    res.status(400).json({ error: 'transactions array is required' });
+    return;
+  }
+
+  let importedExpenses = 0;
+  let importedIncomes = 0;
+
+  const insertExp = db.prepare(`
+    INSERT INTO expenses (
+      id, date, month, category, tag, description, amount, payment_method,
+      tax_classification, business_percentage, gst_rate, gst_itc_eligible,
+      has_invoice_voucher, voucher_ref, notes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'SBI Current Account', ?, ?, ?, ?, 1, ?, ?)
+  `);
+
+  const insertInc = db.prepare(`
+    INSERT INTO income_entries (
+      id, date, month, category, source, amount, notes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const tx = db.transaction(() => {
+    for (const item of transactions) {
+      const date = item.date || new Date().toISOString().slice(0, 10);
+      const month = date.slice(0, 7);
+      const amt = Number(item.amount) || 0;
+      if (amt <= 0) continue;
+
+      if (item.type === 'DEBIT') {
+        const id = `exp-sbi-imp-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+        insertExp.run(
+          id,
+          date,
+          month,
+          item.category || 'reg',
+          item.tag || 'Bank Debit',
+          item.description || 'SBI Bank Debit',
+          amt,
+          item.tax_classification || 'BUSINESS_DEDUCTIBLE',
+          item.business_percentage !== undefined ? item.business_percentage : 100,
+          item.gst_rate || 0,
+          item.gst_itc_eligible ? 1 : 0,
+          item.ref_no || 'SBI-CSV-IMPORT',
+          item.notes || 'Imported from SBI Statement'
+        );
+        importedExpenses++;
+      } else if (item.type === 'CREDIT') {
+        const id = `inc-sbi-imp-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+        const isCapital = item.tax_classification === 'CAPITAL_INTRODUCED';
+        insertInc.run(
+          id,
+          date,
+          month,
+          isCapital ? 'saving' : 'fl',
+          isCapital ? 'Personal Savings (Capital Introduced)' : (item.source || 'Client Revenue'),
+          amt,
+          isCapital
+            ? 'Capital introduced from Personal Savings - Excluded from Taxable Turnover'
+            : (item.notes || 'Imported from SBI Statement')
+        );
+        importedIncomes++;
+      }
+    }
+  });
+
+  try {
+    tx();
+    res.json({ success: true, importedExpenses, importedIncomes });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Serve static client assets in production if dist exists
+const distPath = path.resolve(process.cwd(), 'dist');
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  app.use((req: Request, res: Response, next) => {
+    if (req.path.startsWith('/api')) {
+      return next();
+    }
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
+
 app.listen(PORT, () => {
   console.log(`⚡ Billing API Server running on http://localhost:${PORT}`);
 });
+
 

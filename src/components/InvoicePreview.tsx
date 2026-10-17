@@ -418,6 +418,12 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({ invoice, profile
                             </button>
                           </div>
                           <div>
+                            <span style={{ color: '#64748b' }}>A/C Type:</span>{' '}
+                            <span style={{ fontWeight: '600', color: '#0f172a' }}>
+                              {invoice.accountType || profile.accountType || 'Current Account'}
+                            </span>
+                          </div>
+                          <div>
                             <span style={{ color: '#64748b' }}>IFSC:</span>{' '}
                             <span style={{ fontWeight: '700', color: '#0f172a', fontFamily: 'monospace' }}>
                               {profile.ifscCode}

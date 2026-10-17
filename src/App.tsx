@@ -8,14 +8,37 @@ import { Settings } from './components/Settings';
 import { ItemsCatalog } from './components/ItemsCatalog';
 import { InvoiceEditor } from './components/InvoiceEditor';
 import { Automations } from './components/Automations';
+import { BudgetDashboard } from './components/budget/BudgetDashboard';
+import { ExpensePage } from './components/budget/ExpensePage';
+import { IncomePage } from './components/budget/IncomePage';
+import { BorrowPage } from './components/budget/BorrowPage';
+import { GoalsPage } from './components/budget/GoalsPage';
+import { TaxPortal } from './components/tax/TaxPortal';
+import { ThemeProvider, useTheme } from './context/ThemeContext';
+import { RouterProvider, useRouter } from './context/RouterContext';
+import { Menu, Sun, Moon, Plus } from 'lucide-react';
+import { Button } from './components/ui/button';
 
-export const App: React.FC = () => {
-  const [currentTab, setCurrentTab] = useState<NavTab>('dashboard');
+export const AppContent: React.FC = () => {
+  const { resolvedTheme, toggleTheme } = useTheme();
+  const { route, navigate, tabToPath } = useRouter();
+  const currentTab = route.tab;
+
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Responsive Sidebar States
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('billings_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   // Editor State
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
@@ -26,6 +49,37 @@ export const App: React.FC = () => {
   useEffect(() => {
     fetchAllData();
   }, []);
+
+  // Sync route parameters with state (e.g. /invoices/new, /invoices/:id, /organizations/:id)
+  useEffect(() => {
+    if (route.tab === 'invoices') {
+      if (route.paramId === 'new') {
+        setEditingInvoice(null);
+        setIsEditorOpen(true);
+      } else if (route.paramId && invoices.length > 0) {
+        const found = invoices.find(
+          (inv) => inv.id === route.paramId || inv.invoice_number === route.paramId
+        );
+        if (found) {
+          setEditingInvoice(found);
+          setIsEditorOpen(true);
+        }
+      } else if (!route.paramId) {
+        setIsEditorOpen(false);
+        setEditingInvoice(null);
+      }
+    } else if (route.tab === 'organizations') {
+      if (route.paramId) {
+        setActiveOrgId(route.paramId);
+      }
+    } else {
+      // If navigated away from invoices tab, close editor
+      if (isEditorOpen) {
+        setIsEditorOpen(false);
+        setEditingInvoice(null);
+      }
+    }
+  }, [route.tab, route.paramId, invoices]);
 
   const fetchAllData = async () => {
     try {
@@ -59,16 +113,18 @@ export const App: React.FC = () => {
     setEditingInvoice(null);
     setPreselectedOrgId(orgId || null);
     setIsEditorOpen(true);
+    navigate('/invoices/new');
   };
 
   const handleSelectOrg = (orgId: string) => {
     setActiveOrgId(orgId);
-    setCurrentTab('organizations');
+    navigate(`/organizations/${orgId}`);
   };
 
   const handleEditInvoice = (inv: Invoice) => {
     setEditingInvoice(inv);
     setIsEditorOpen(true);
+    navigate(`/invoices/${inv.id}`);
   };
 
   const handleDuplicateInvoice = async (inv: Invoice) => {
@@ -84,6 +140,16 @@ export const App: React.FC = () => {
     };
     setEditingInvoice(duplicated);
     setIsEditorOpen(true);
+    navigate('/invoices/new');
+  };
+
+  const handleCloseEditor = () => {
+    setIsEditorOpen(false);
+    setEditingInvoice(null);
+    setPreselectedOrgId(null);
+    if (route.path.startsWith('/invoices')) {
+      navigate('/invoices');
+    }
   };
 
   const handleSaveInvoice = async (invoiceData: Partial<Invoice>) => {
@@ -104,7 +170,7 @@ export const App: React.FC = () => {
       setIsEditorOpen(false);
       setEditingInvoice(null);
       await fetchAllData();
-      setCurrentTab('invoices');
+      navigate('/invoices');
     } catch (err) {
       console.error('Failed to save invoice:', err);
       alert('Failed to save invoice. Please check the server logs.');
@@ -115,59 +181,50 @@ export const App: React.FC = () => {
     try {
       await fetch(`/api/invoices/${id}`, { method: 'DELETE' });
       await fetchAllData();
+      if (route.path === `/invoices/${id}`) {
+        navigate('/invoices');
+      }
     } catch (err) {
       console.error('Failed to delete invoice:', err);
     }
   };
 
-  const handleStatusChange = async (id: string, status: Invoice['status'], amountPaid?: number) => {
+  const handleStatusChange = async (id: string, newStatus: string) => {
     try {
       const inv = invoices.find((i) => i.id === id);
       if (!inv) return;
 
-      const paid = amountPaid !== undefined ? amountPaid : inv.amount_paid;
-      const balance = Math.max(0, inv.total - paid);
+      const updated = {
+        ...inv,
+        status: newStatus,
+        amount_paid: newStatus === 'paid' ? inv.total : inv.amount_paid,
+        balance_due: newStatus === 'paid' ? 0 : inv.total,
+      };
 
       await fetch(`/api/invoices/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...inv,
-          status,
-          amount_paid: paid,
-          balance_due: balance,
-        }),
+        body: JSON.stringify(updated),
       });
 
       await fetchAllData();
     } catch (err) {
-      console.error('Failed to update status:', err);
+      console.error('Failed to update invoice status:', err);
     }
   };
 
   const handleSaveSettings = async (newSettings: AppSettings) => {
     try {
       await fetch('/api/settings', {
-        method: 'PUT',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newSettings),
       });
-      setSettings(newSettings);
+      await fetchAllData();
     } catch (err) {
-      console.error('Failed to save settings:', err);
+      console.error('Failed to update settings:', err);
     }
   };
-
-  if (loading && !settings) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-900 text-white">
-        <div className="text-center space-y-3">
-          <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-sm font-medium text-slate-300">Loading Billing Records & Profile...</p>
-        </div>
-      </div>
-    );
-  }
 
   const defaultProfile = settings?.profile || {
     name: 'Suren Hembram',
@@ -181,127 +238,256 @@ export const App: React.FC = () => {
     udyamNumber: 'UDYAM-JH-06-0090498-01-0004921',
     showUdyamOnBill: true,
     bankName: 'State Bank of India',
+    accountType: 'Current Account',
     accountNumber: '45661497562',
     ifscCode: 'SBIN0014355',
     accountHolder: 'Suren Hembram',
-    upiId: 'surenhembram@okaxis',
+    upiId: '',
+    showBankDetailsOnBill: true,
+    showUpiOnBill: true,
+    showQrOnBill: true,
     defaultNotes: 'Thanks for your business.',
     defaultTerms: 'Due on Receipt',
     signatureText: 'Authorized Signature',
   };
 
+  const getTabTitle = (tab: NavTab) => {
+    switch (tab) {
+      case 'dashboard':
+        return 'Executive Overview';
+      case 'invoices':
+        return 'Invoices & Billing';
+      case 'organizations':
+        return 'Client Organizations';
+      case 'budget':
+        return 'Personal Budget & Expense Ledger';
+      case 'expenses':
+        return 'Expense Ledger';
+      case 'income':
+        return 'Personal Income Streams';
+      case 'borrow':
+        return 'Loans, Debts & Returns';
+      case 'goals':
+        return 'Financial Goals';
+      case 'tax':
+        return 'Tax Compliance Portal';
+      case 'automations':
+        return 'Recurring Schedules';
+      case 'catalog':
+        return 'Items & Rates';
+      case 'settings':
+        return 'Settings & Profile';
+      default:
+        return 'Billings';
+    }
+  };
+
   return (
-    <div className="flex h-screen bg-slate-100 overflow-hidden font-sans">
+    <div className="flex h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans transition-colors duration-200">
       {/* Sidebar */}
       {!isEditorOpen && (
         <Sidebar
           currentTab={currentTab}
           onSelectTab={(tab) => {
             if (tab === 'organizations') setActiveOrgId(null);
-            setCurrentTab(tab);
+            navigate(tabToPath(tab));
           }}
           onNewInvoice={() => handleNewInvoice()}
           orgCount={organizations.length}
           invoiceCount={invoices.length}
+          isMobileOpen={isMobileSidebarOpen}
+          onCloseMobile={() => setIsMobileSidebarOpen(false)}
+          isCollapsed={isSidebarCollapsed}
+          onToggleCollapse={() => {
+            const next = !isSidebarCollapsed;
+            setIsSidebarCollapsed(next);
+            try {
+              localStorage.setItem('billings_sidebar_collapsed', String(next));
+            } catch {}
+          }}
         />
       )}
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto">
-        {isEditorOpen ? (
-          <InvoiceEditor
-            invoice={
-              editingInvoice ||
-              (preselectedOrgId
-                ? ({ organization_id: preselectedOrgId } as any)
-                : null)
-            }
-            organizations={organizations}
-            profile={defaultProfile}
-            catalog={catalog}
-            onSave={handleSaveInvoice}
-            onCancel={() => {
-              setIsEditorOpen(false);
-              setEditingInvoice(null);
-              setPreselectedOrgId(null);
-            }}
-            onRefreshOrgs={fetchAllData}
-          />
-        ) : (
-          <>
-            {currentTab === 'dashboard' && (
-              <Dashboard
-                invoices={invoices}
-                organizations={organizations}
-                profile={defaultProfile}
-                onNewInvoice={() => handleNewInvoice()}
-                onViewInvoices={() => setCurrentTab('invoices')}
-                onViewOrganizations={() => {
-                  setActiveOrgId(null);
-                  setCurrentTab('organizations');
-                }}
-                onSelectInvoice={(inv) => {
-                  setEditingInvoice(inv);
-                  setIsEditorOpen(true);
-                }}
-                onSelectOrg={handleSelectOrg}
-              />
-            )}
-
-            {currentTab === 'invoices' && (
-              <InvoiceList
-                invoices={invoices}
-                organizations={organizations}
-                profile={defaultProfile}
-                onEdit={handleEditInvoice}
-                onDelete={handleDeleteInvoice}
-                onDuplicate={handleDuplicateInvoice}
-                onStatusChange={handleStatusChange}
-                onNewInvoice={() => handleNewInvoice()}
-                onSelectOrg={handleSelectOrg}
-              />
-            )}
-
-            {currentTab === 'organizations' && (
-              <Organizations
-                organizations={organizations}
-                invoices={invoices}
-                profile={defaultProfile}
-                onRefresh={fetchAllData}
-                onNewInvoiceForOrg={(orgId) => handleNewInvoice(orgId)}
-                onEditInvoice={handleEditInvoice}
-                initialOrgId={activeOrgId}
-                onSelectOrgId={setActiveOrgId}
-              />
-            )}
-
-            {currentTab === 'automations' && (
-              <div className="p-8 max-w-7xl mx-auto">
-                <Automations
-                  organizations={organizations}
-                  onViewInvoice={(_invId) => {
-                    fetchAllData().then(() => setCurrentTab('invoices'));
-                  }}
-                  onRefreshInvoices={fetchAllData}
-                />
+      <div className="flex-1 flex flex-col h-full overflow-hidden">
+        {/* Mobile Top Header (only visible on < md) */}
+        {!isEditorOpen && (
+          <header className="md:hidden bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 py-2.5 flex items-center justify-between no-print shrink-0 shadow-2xs">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setIsMobileSidebarOpen(true)}
+                className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                aria-label="Open navigation menu"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white text-xs shadow-xs">
+                  H
+                </div>
+                <span className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                  {getTabTitle(currentTab)}
+                </span>
               </div>
-            )}
+            </div>
 
-            {currentTab === 'catalog' && (
-              <ItemsCatalog catalog={catalog} onRefresh={fetchAllData} />
-            )}
-
-            {currentTab === 'settings' && settings && (
-              <Settings
-                settings={settings}
-                onSaveSettings={handleSaveSettings}
-                onRefresh={fetchAllData}
-              />
-            )}
-          </>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={toggleTheme}
+                title="Toggle Theme"
+                className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                {resolvedTheme === 'dark' ? (
+                  <Sun className="w-4 h-4 text-amber-400" />
+                ) : (
+                  <Moon className="w-4 h-4 text-blue-500" />
+                )}
+              </button>
+              <Button
+                size="sm"
+                onClick={() => handleNewInvoice()}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs shadow-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Bill</span>
+              </Button>
+            </div>
+          </header>
         )}
-      </main>
+
+        <main className="flex-1 overflow-y-auto">
+          {isEditorOpen ? (
+            <InvoiceEditor
+              invoice={
+                editingInvoice ||
+                (preselectedOrgId
+                  ? ({ organization_id: preselectedOrgId } as any)
+                  : null)
+              }
+              organizations={organizations}
+              profile={defaultProfile}
+              catalog={catalog}
+              onSave={handleSaveInvoice}
+              onCancel={handleCloseEditor}
+              onRefreshOrgs={fetchAllData}
+            />
+          ) : (
+            <>
+              {currentTab === 'dashboard' && (
+                <Dashboard
+                  invoices={invoices}
+                  organizations={organizations}
+                  profile={defaultProfile}
+                  onNewInvoice={() => handleNewInvoice()}
+                  onViewInvoices={() => navigate('/invoices')}
+                  onViewOrganizations={() => {
+                    setActiveOrgId(null);
+                    navigate('/organizations');
+                  }}
+                  onSelectInvoice={(inv) => handleEditInvoice(inv)}
+                  onSelectOrg={handleSelectOrg}
+                  onNavigate={(tab) => navigate(tabToPath(tab))}
+                />
+              )}
+
+              {currentTab === 'invoices' && (
+                <InvoiceList
+                  invoices={invoices}
+                  organizations={organizations}
+                  profile={defaultProfile}
+                  onEdit={handleEditInvoice}
+                  onDelete={handleDeleteInvoice}
+                  onDuplicate={handleDuplicateInvoice}
+                  onStatusChange={handleStatusChange}
+                  onNewInvoice={() => handleNewInvoice()}
+                  onSelectOrg={handleSelectOrg}
+                />
+              )}
+
+              {currentTab === 'budget' && (
+                <BudgetDashboard profile={defaultProfile} />
+              )}
+
+              {currentTab === 'expenses' && (
+                <ExpensePage />
+              )}
+
+              {currentTab === 'income' && (
+                <IncomePage />
+              )}
+
+              {currentTab === 'borrow' && (
+                <BorrowPage />
+              )}
+
+              {currentTab === 'goals' && (
+                <GoalsPage />
+              )}
+
+              {currentTab === 'tax' && (
+                <div className="p-4 sm:p-6 lg:p-8 space-y-6 w-full">
+                  <TaxPortal profile={defaultProfile} />
+                </div>
+              )}
+
+              {currentTab === 'organizations' && (
+                <Organizations
+                  organizations={organizations}
+                  invoices={invoices}
+                  profile={defaultProfile}
+                  onRefresh={fetchAllData}
+                  onNewInvoiceForOrg={(orgId) => handleNewInvoice(orgId)}
+                  onEditInvoice={handleEditInvoice}
+                  initialOrgId={activeOrgId}
+                  onSelectOrgId={(orgId) => {
+                    setActiveOrgId(orgId);
+                    if (orgId) {
+                      navigate(`/organizations/${orgId}`);
+                    } else {
+                      navigate('/organizations');
+                    }
+                  }}
+                />
+              )}
+
+              {currentTab === 'automations' && (
+                <div className="p-4 sm:p-6 lg:p-8 space-y-6 w-full">
+                  <Automations
+                    organizations={organizations}
+                    onViewInvoice={(_invId) => {
+                      fetchAllData().then(() => navigate('/invoices'));
+                    }}
+                    onRefreshInvoices={fetchAllData}
+                  />
+                </div>
+              )}
+
+              {currentTab === 'catalog' && (
+                <ItemsCatalog catalog={catalog} onRefresh={fetchAllData} />
+              )}
+
+              {currentTab === 'settings' && settings && (
+                <Settings
+                  settings={settings}
+                  onSaveSettings={handleSaveSettings}
+                  onRefresh={fetchAllData}
+                />
+              )}
+            </>
+          )}
+        </main>
+      </div>
     </div>
+  );
+};
+
+export const App: React.FC = () => {
+  return (
+    <ThemeProvider>
+      <RouterProvider>
+        <AppContent />
+      </RouterProvider>
+    </ThemeProvider>
   );
 };
 

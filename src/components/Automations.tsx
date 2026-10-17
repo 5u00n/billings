@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Sparkles,
+  Calculator,
   Calendar,
   Repeat,
   Plus,
@@ -681,7 +681,7 @@ export const Automations: React.FC<AutomationsProps> = ({
                         onClick={handleDivideTotalEvenly}
                         className="text-[11px] font-bold h-7 gap-1 text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200"
                       >
-                        <Sparkles className="w-3 h-3" />
+                        <Calculator className="w-3 h-3" />
                         Divide Total Evenly Across Dates
                       </Button>
                       <Button

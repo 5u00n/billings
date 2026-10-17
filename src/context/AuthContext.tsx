@@ -40,8 +40,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Check allowed emails list strictly from environment configuration
-  const allowedEmailsStr = import.meta.env.VITE_ALLOWED_EMAILS || '';
+  // Check allowed emails list strictly from environment configuration (runtime or build-time)
+  const runtimeEnv = typeof window !== 'undefined' ? (window as any).__ENV__ || {} : {};
+  const allowedEmailsStr = runtimeEnv.VITE_ALLOWED_EMAILS || import.meta.env.VITE_ALLOWED_EMAILS || '';
   const allowedEmails = allowedEmailsStr
     .split(',')
     .map((e: string) => e.trim().toLowerCase())

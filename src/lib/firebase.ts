@@ -12,14 +12,16 @@ export interface FirebaseConfig {
 }
 
 export function getActiveFirebaseConfig(): FirebaseConfig | null {
+  const runtimeEnv = typeof window !== 'undefined' ? (window as any).__ENV__ || {} : {};
+
   const envConfig: FirebaseConfig = {
-    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    appId: import.meta.env.VITE_FIREBASE_APP_ID,
-    measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+    apiKey: runtimeEnv.VITE_FIREBASE_API_KEY || import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: runtimeEnv.VITE_FIREBASE_AUTH_DOMAIN || import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: runtimeEnv.VITE_FIREBASE_PROJECT_ID || import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: runtimeEnv.VITE_FIREBASE_STORAGE_BUCKET || import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: runtimeEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: runtimeEnv.VITE_FIREBASE_APP_ID || import.meta.env.VITE_FIREBASE_APP_ID,
+    measurementId: runtimeEnv.VITE_FIREBASE_MEASUREMENT_ID || import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
   };
 
   if (envConfig.apiKey && envConfig.projectId) {

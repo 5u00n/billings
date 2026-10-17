@@ -9,6 +9,13 @@
     "not_found_handling": "single-page-application",
     "binding": "ASSETS"
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "billings-db",
+      "database_id": "billings-db"
+    }
+  ],
   "vars": {
     "BACKEND_URL": ""
   }

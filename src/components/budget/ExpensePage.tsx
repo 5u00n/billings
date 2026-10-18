@@ -24,16 +24,19 @@ export const ExpensePage: React.FC = () => {
   const fetchMonths = async () => {
     try {
       const res = await fetch('/api/budget/months');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (Array.isArray(data) && data.length > 0) {
         setAvailableMonths(data);
-        if (!data.includes(selectedMonth)) {
+        if (selectedMonth !== 'all' && !data.includes(selectedMonth)) {
           setSelectedMonth(data[0]);
         }
       } else {
         const currentM = new Date().toISOString().substring(0, 7);
         setAvailableMonths([currentM]);
-        setSelectedMonth(currentM);
+        if (selectedMonth !== 'all') {
+          setSelectedMonth(currentM);
+        }
       }
     } catch (err) {
       console.error('Failed to fetch months:', err);
@@ -44,12 +47,23 @@ export const ExpensePage: React.FC = () => {
     try {
       setLoading(true);
       const res = await fetch(`/api/budget/expenses?month=${m}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      setExpenses(data || []);
+      setExpenses(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to load expenses:', err);
+      setExpenses([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRefresh = async (entryMonth?: string) => {
+    await fetchMonths();
+    if (entryMonth && entryMonth !== selectedMonth && selectedMonth !== 'all') {
+      setSelectedMonth(entryMonth);
+    } else {
+      loadExpenses(selectedMonth);
     }
   };
 
@@ -115,7 +129,7 @@ export const ExpensePage: React.FC = () => {
       <ExpenseLogView
         expenses={expenses}
         currentMonth={selectedMonth}
-        onRefresh={() => loadExpenses(selectedMonth)}
+        onRefresh={handleRefresh}
         quickAddOpen={isQuickAddOpen}
         onCloseQuickAdd={() => setIsQuickAddOpen(false)}
       />

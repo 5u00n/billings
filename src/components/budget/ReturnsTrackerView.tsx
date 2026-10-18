@@ -15,13 +15,74 @@ import {
   Users,
   Coins,
   Check,
+  FileSpreadsheet,
 } from 'lucide-react';
+import { DataImportModal, FieldDefinition } from '../common/DataImportModal';
 
 interface ReturnsTrackerViewProps {
   records: BorrowRecord[];
   currentMonth: string;
   onRefresh: () => void;
 }
+
+const RETURNS_IMPORT_FIELDS: FieldDefinition[] = [
+  {
+    key: 'date',
+    label: 'Date (YYYY-MM-DD)',
+    required: true,
+    type: 'date',
+    synonyms: ['date', 'txn date', 'record date', 'day', 'dt'],
+  },
+  {
+    key: 'person',
+    label: 'Person / Party',
+    required: true,
+    type: 'string',
+    synonyms: ['person', 'name', 'party', 'contact', 'friend'],
+  },
+  {
+    key: 'amount',
+    label: 'Amount Returned (₹)',
+    required: true,
+    type: 'number',
+    synonyms: ['amount', 'amt', 'value', 'returned', 'repayment', 'total'],
+  },
+  {
+    key: 'status',
+    label: 'Status (SETTLED / PENDING)',
+    required: false,
+    type: 'string',
+    synonyms: ['status', 'state'],
+    defaultValue: 'SETTLED',
+  },
+  {
+    key: 'reason',
+    label: 'Reason / Purpose',
+    required: false,
+    type: 'string',
+    synonyms: ['reason', 'purpose', 'for', 'description', 'notes'],
+    defaultValue: 'Repayment of loan',
+  },
+  {
+    key: 'type',
+    label: 'Type',
+    required: false,
+    type: 'string',
+    synonyms: ['type'],
+    defaultValue: 'RETURN',
+  },
+];
+
+const RETURNS_SAMPLE_TEMPLATE = [
+  {
+    'Date': '2026-10-10',
+    'Person': 'Alex Sharma',
+    'Amount': 2000,
+    'Status': 'SETTLED',
+    'Reason': 'Partial return of emergency cash',
+    'Type': 'RETURN',
+  },
+];
 
 export const ReturnsTrackerView: React.FC<ReturnsTrackerViewProps> = ({
   records,
@@ -34,6 +95,7 @@ export const ReturnsTrackerView: React.FC<ReturnsTrackerViewProps> = ({
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDING' | 'SETTLED'>('ALL');
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<BorrowRecord | null>(null);
 
   // Form State
@@ -225,14 +287,22 @@ export const ReturnsTrackerView: React.FC<ReturnsTrackerViewProps> = ({
           </p>
         </div>
 
-        {/* Add Return Button */}
-        <div className="flex items-center">
+        {/* Action Buttons */}
+        <div className="flex flex-col gap-2 justify-center">
           <Button
             onClick={handleOpenNew}
-            className="w-full h-full min-h-[58px] bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white font-medium shadow-xs flex items-center justify-center gap-2 rounded-xl text-xs cursor-pointer transition-colors"
+            className="w-full py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white font-medium shadow-xs flex items-center justify-center gap-2 rounded-xl text-xs cursor-pointer transition-colors"
           >
             <Plus className="w-4 h-4" />
             Record Money Returned to Me
+          </Button>
+          <Button
+            onClick={() => setIsImportModalOpen(true)}
+            variant="outline"
+            className="w-full py-2 border-emerald-300 dark:border-emerald-800/80 bg-emerald-50/60 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/60 font-medium shadow-2xs flex items-center justify-center gap-2 rounded-xl text-xs cursor-pointer transition-colors"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            Import Excel / CSV
           </Button>
         </div>
       </div>
@@ -492,6 +562,22 @@ export const ReturnsTrackerView: React.FC<ReturnsTrackerViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Excel / CSV Import Modal */}
+      <DataImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        title="Import Returned Money Records from Excel / CSV"
+        description="Bulk import repayments of money lent to contacts or friends"
+        entityName="Returns"
+        targetFields={RETURNS_IMPORT_FIELDS}
+        sampleData={RETURNS_SAMPLE_TEMPLATE}
+        apiEndpoint="/api/budget/borrow/batch"
+        onSuccess={(count) => {
+          alert(`Successfully imported ${count} return records!`);
+          onRefresh();
+        }}
+      />
     </div>
   );
 };

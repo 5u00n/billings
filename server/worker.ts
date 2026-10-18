@@ -492,6 +492,22 @@ export default {
           }
         }
 
+        if (url.pathname === '/api/catalog/batch' && method === 'POST') {
+          const { items } = (await request.json()) as any;
+          if (!Array.isArray(items)) return errorResponse('Items array required', 400);
+          let count = 0;
+          for (const it of items) {
+            if (!it.name && !it.description) continue;
+            const id = it.id || crypto.randomUUID();
+            const name = String(it.name || it.description || 'Item').trim();
+            const desc = String(it.description || '').trim();
+            const rate = Number(it.default_rate || it.rate || 0);
+            await db.prepare('INSERT INTO catalog_items (id, name, description, default_rate) VALUES (?, ?, ?, ?)').bind(id, name, desc, rate).run();
+            count++;
+          }
+          return jsonResponse({ success: true, count });
+        }
+
         if (url.pathname.startsWith('/api/catalog/') && method === 'DELETE') {
           const id = url.pathname.replace('/api/catalog/', '');
           await db.prepare('DELETE FROM catalog_items WHERE id = ?').bind(id).run();
@@ -511,34 +527,197 @@ export default {
             ORDER BY month DESC
           `;
           const { results } = await db.prepare(q).all();
-          const months = results.map((r: any) => r.month).filter(Boolean);
+          const currentMonth = new Date().toISOString().substring(0, 7);
+          const months = Array.from(new Set([...results.map((r: any) => r.month).filter(Boolean), currentMonth])).sort().reverse();
           return jsonResponse(months);
+        }
+
+        // --- BUDGET: CONSOLIDATED MONTH BUNDLE (Single Roundtrip) ---
+        if (url.pathname === '/api/budget/month-bundle' && method === 'GET') {
+          const m = url.searchParams.get('month') || new Date().toISOString().substring(0, 7);
+          const isAll = m === 'all';
+
+          // 1. Fetch available months
+          const qMonths = `
+            SELECT DISTINCT month FROM expenses
+            UNION
+            SELECT DISTINCT month FROM income_entries
+            UNION
+            SELECT DISTINCT month FROM borrow_records
+            UNION
+            SELECT month FROM monthly_budget_summaries
+            ORDER BY month DESC
+          `;
+          const { results: mResults } = await db.prepare(qMonths).all();
+          const months = mResults.map((r: any) => r.month).filter(Boolean);
+          const currentM = new Date().toISOString().substring(0, 7);
+          if (!months.includes(currentM)) months.unshift(currentM);
+
+          // 2. Fetch expenses, income, borrow, goals, rules, and summary
+          const expQuery = isAll
+            ? 'SELECT * FROM expenses ORDER BY date DESC'
+            : 'SELECT * FROM expenses WHERE month = ? ORDER BY date DESC';
+          const incQuery = isAll
+            ? 'SELECT * FROM income_entries ORDER BY date DESC'
+            : 'SELECT * FROM income_entries WHERE month = ? ORDER BY date DESC';
+          const brQuery = isAll
+            ? 'SELECT * FROM borrow_records ORDER BY date DESC'
+            : 'SELECT * FROM borrow_records WHERE month = ? ORDER BY date DESC';
+
+          const [expRes, incRes, brRes, goalsRes, rulesRes, summaryRow] = await Promise.all([
+            isAll ? db.prepare(expQuery).all() : db.prepare(expQuery).bind(m).all(),
+            isAll ? db.prepare(incQuery).all() : db.prepare(incQuery).bind(m).all(),
+            isAll ? db.prepare(brQuery).all() : db.prepare(brQuery).bind(m).all(),
+            db.prepare('SELECT * FROM financial_goals ORDER BY target_amount DESC').all(),
+            db.prepare('SELECT * FROM budget_allocation_rules ORDER BY display_order ASC').all(),
+            isAll
+              ? db.prepare('SELECT starting_debt, previous_remaining FROM monthly_budget_summaries ORDER BY month ASC LIMIT 1').first()
+              : db.prepare('SELECT * FROM monthly_budget_summaries WHERE month = ?').bind(m).first(),
+          ]);
+
+          const expenses = expRes.results || [];
+          const incomes = incRes.results || [];
+          const borrows = brRes.results || [];
+          const goals = goalsRes.results || [];
+          const rules = rulesRes.results || [];
+
+          // Compute summary calculations
+          let regExpense = 0;
+          let extExpense = 0;
+          expenses.forEach((e: any) => {
+            if (e.category === 'reg') regExpense += Number(e.amount) || 0;
+            else extExpense += Number(e.amount) || 0;
+          });
+          const totalExpense = regExpense + extExpense;
+
+          let salary = 0;
+          let freelance = 0;
+          let returns = 0;
+          let extIncome = 0;
+          incomes.forEach((i: any) => {
+            if (i.category === 'sal') salary += Number(i.amount) || 0;
+            else if (i.category === 'fl') freelance += Number(i.amount) || 0;
+            else if (i.category === 'rt') returns += Number(i.amount) || 0;
+            else extIncome += Number(i.amount) || 0;
+          });
+
+          // Returns and borrows
+          let borrowReturns = 0;
+          let autoBorrow = 0;
+          borrows.forEach((b: any) => {
+            if (b.type === 'RETURN') borrowReturns += Number(b.amount) || 0;
+            else if (b.type === 'BORROW') autoBorrow += Number(b.amount) || 0;
+          });
+          returns = Math.max(returns, borrowReturns);
+
+          const rawSummary = summaryRow as any;
+          const startingDebt = Number(rawSummary?.starting_debt) || 0;
+          const previousRemaining = Number(rawSummary?.previous_remaining) || 0;
+          const debtPayment = Number(rawSummary?.dept_payment) || 0;
+          const finalBorrow = rawSummary?.borrow_amount !== undefined && rawSummary?.borrow_amount !== null ? Number(rawSummary.borrow_amount) : autoBorrow;
+          const regSavings = Number(rawSummary?.reg_savings) || 0;
+          const extSavings = Number(rawSummary?.ext_savings) || 0;
+
+          const totalIncomeEarned = salary + freelance + returns + extIncome;
+          const totalInflow = previousRemaining + totalIncomeEarned;
+          const overhead = (totalInflow + finalBorrow) - (totalExpense + debtPayment);
+          const overheadSavings = overhead > 0 ? Math.round(overhead / 2) : 0;
+          const totalSavings = regSavings + extSavings + overheadSavings;
+          const remaining = overhead - overheadSavings;
+          const endingDebt = startingDebt + finalBorrow - debtPayment;
+
+          const summary = {
+            month: m,
+            starting_debt: startingDebt,
+            previous_remaining: previousRemaining,
+            salary,
+            freelance,
+            returns,
+            ext_income: extIncome,
+            total_income_earned: totalIncomeEarned,
+            total_income: totalInflow,
+            total_inflow: totalInflow,
+            reg_savings: regSavings,
+            ext_savings: extSavings,
+            overhead_savings: overheadSavings,
+            total_savings: totalSavings,
+            reg_expense: regExpense,
+            ext_expense: extExpense,
+            total_expense: totalExpense,
+            dept_payment: debtPayment,
+            borrow_amount: finalBorrow,
+            overhead,
+            remaining,
+            ending_debt: endingDebt,
+            notes: rawSummary?.notes || '',
+          };
+
+          // Compute planned vs actual allocations
+          const allocations = rules.map((r: any) => {
+            const planned = Math.round(totalInflow * Number(r.percentage));
+            let actual = 0;
+            if (r.category === 'Essentials') {
+              actual = regExpense;
+            } else if (r.category === 'Small Assets') {
+              expenses.forEach((e: any) => {
+                if (e.tag === 'Gadgets' || e.tag === 'Accessories') actual += Number(e.amount) || 0;
+              });
+            } else if (r.category === 'Business Growth') {
+              expenses.forEach((e: any) => {
+                if (e.tag === 'Services' || e.tag === 'Hosting' || e.tag === 'Tools') actual += Number(e.amount) || 0;
+              });
+            }
+            return {
+              ...r,
+              planned_amount: planned,
+              actual_spent: actual,
+              variance: planned - actual,
+            };
+          });
+
+          return jsonResponse({
+            month: m,
+            summary,
+            expenses,
+            incomes,
+            borrows,
+            goals,
+            allocations,
+            total_income: totalInflow,
+            months,
+          });
         }
 
         // --- BUDGET: EXPENSES ---
         if (url.pathname === '/api/budget/expenses') {
           if (method === 'GET') {
             const m = url.searchParams.get('month');
-            const stmt = m
+            const stmt = m && m !== 'all'
               ? db.prepare('SELECT * FROM expenses WHERE month = ? ORDER BY date DESC').bind(m)
               : db.prepare('SELECT * FROM expenses ORDER BY date DESC');
             const { results } = await stmt.all();
-            return jsonResponse(results);
+            return jsonResponse(results || []);
           }
           if (method === 'POST') {
             const b = (await request.json()) as any;
             const id = b.id || crypto.randomUUID();
+            const date = (b.date && typeof b.date === 'string' && b.date.trim())
+              ? b.date.trim()
+              : new Date().toISOString().split('T')[0];
+            const month = b.month || date.substring(0, 7);
+            const amount = Number(b.amount) || 0;
+
             await db.prepare(`
               INSERT INTO expenses (id, date, month, category, tag, description, amount, payment_method, notes, tax_classification, business_percentage, gst_rate, gst_itc_eligible, has_invoice_voucher, voucher_ref)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).bind(
               id,
-              b.date,
-              b.month || b.date.slice(0, 7),
-              b.category,
-              b.tag || '',
-              b.description,
-              b.amount,
+              date,
+              month,
+              b.category === 'reg' ? 'reg' : 'ext',
+              b.tag || 'General',
+              String(b.description || 'Expense').trim(),
+              amount,
               b.payment_method || 'UPI / Bank',
               b.notes || '',
               b.tax_classification || 'BUSINESS_DEDUCTIBLE',
@@ -548,14 +727,56 @@ export default {
               b.has_invoice_voucher ? 1 : 0,
               b.voucher_ref || ''
             ).run();
-            return jsonResponse({ id, success: true }, 201);
+            return jsonResponse({ id, month, success: true }, 201);
           }
+        }
+
+        if (url.pathname === '/api/budget/expenses/batch' && method === 'POST') {
+          const { items } = (await request.json()) as any;
+          if (!Array.isArray(items)) return errorResponse('Items array required', 400);
+          let count = 0;
+          for (const b of items) {
+            const amount = Number(b.amount) || 0;
+            if (amount <= 0 || !b.description) continue;
+            const date = (b.date && typeof b.date === 'string' && b.date.trim())
+              ? b.date.trim().substring(0, 10)
+              : new Date().toISOString().split('T')[0];
+            const month = b.month || date.substring(0, 7);
+            const id = b.id || crypto.randomUUID();
+
+            await db.prepare(`
+              INSERT INTO expenses (id, date, month, category, tag, description, amount, payment_method, notes, tax_classification, business_percentage, gst_rate, gst_itc_eligible, has_invoice_voucher, voucher_ref)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).bind(
+              id,
+              date,
+              month,
+              b.category === 'reg' ? 'reg' : 'ext',
+              b.tag || 'General',
+              String(b.description).trim(),
+              amount,
+              b.payment_method || 'UPI / Bank',
+              b.notes || '',
+              b.tax_classification || 'BUSINESS_DEDUCTIBLE',
+              b.business_percentage ?? 100,
+              b.gst_rate ?? 0,
+              b.gst_itc_eligible ? 1 : 0,
+              b.has_invoice_voucher !== undefined ? (b.has_invoice_voucher ? 1 : 0) : 1,
+              b.voucher_ref || ''
+            ).run();
+            count++;
+          }
+          return jsonResponse({ success: true, count });
         }
 
         if (url.pathname.startsWith('/api/budget/expenses/')) {
           const id = url.pathname.replace('/api/budget/expenses/', '');
           if (method === 'PUT') {
             const b = (await request.json()) as any;
+            const date = (b.date && typeof b.date === 'string' && b.date.trim())
+              ? b.date.trim()
+              : new Date().toISOString().split('T')[0];
+            const month = b.month || date.substring(0, 7);
             await db.prepare(`
               UPDATE expenses SET
                 date = ?, month = ?, category = ?, tag = ?, description = ?, amount = ?,
@@ -563,8 +784,8 @@ export default {
                 gst_rate = ?, gst_itc_eligible = ?, has_invoice_voucher = ?, voucher_ref = ?
               WHERE id = ?
             `).bind(
-              b.date,
-              b.month || b.date.slice(0, 7),
+              date,
+              month,
               b.category,
               b.tag || '',
               b.description,
@@ -591,31 +812,61 @@ export default {
         if (url.pathname === '/api/budget/income') {
           if (method === 'GET') {
             const m = url.searchParams.get('month');
-            const stmt = m
+            const stmt = m && m !== 'all'
               ? db.prepare('SELECT * FROM income_entries WHERE month = ? ORDER BY date DESC').bind(m)
               : db.prepare('SELECT * FROM income_entries ORDER BY date DESC');
             const { results } = await stmt.all();
-            return jsonResponse(results);
+            return jsonResponse(results || []);
           }
           if (method === 'POST') {
             const b = (await request.json()) as any;
             const id = b.id || crypto.randomUUID();
+            const date = (b.date && typeof b.date === 'string' && b.date.trim())
+              ? b.date.trim()
+              : new Date().toISOString().split('T')[0];
+            const month = b.month || date.substring(0, 7);
             await db.prepare(`
               INSERT INTO income_entries (id, date, month, category, source, amount, invoice_id, notes)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `).bind(id, b.date, b.month || b.date.slice(0, 7), b.category, b.source, b.amount, b.invoice_id || null, b.notes || '').run();
-            return jsonResponse({ id, success: true }, 201);
+            `).bind(id, date, month, b.category || 'fl', b.source || 'Client', b.amount || 0, b.invoice_id || null, b.notes || '').run();
+            return jsonResponse({ id, month, success: true }, 201);
           }
+        }
+
+        if (url.pathname === '/api/budget/income/batch' && method === 'POST') {
+          const { items } = (await request.json()) as any;
+          if (!Array.isArray(items)) return errorResponse('Items array required', 400);
+          let count = 0;
+          for (const b of items) {
+            const amount = Number(b.amount) || 0;
+            if (amount <= 0 || !b.source) continue;
+            const date = (b.date && typeof b.date === 'string' && b.date.trim())
+              ? b.date.trim().substring(0, 10)
+              : new Date().toISOString().split('T')[0];
+            const month = b.month || date.substring(0, 7);
+            const id = b.id || crypto.randomUUID();
+
+            await db.prepare(`
+              INSERT INTO income_entries (id, date, month, category, source, amount, invoice_id, notes)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `).bind(id, date, month, b.category || 'fl', String(b.source).trim(), amount, b.invoice_id || null, b.notes || '').run();
+            count++;
+          }
+          return jsonResponse({ success: true, count });
         }
 
         if (url.pathname.startsWith('/api/budget/income/')) {
           const id = url.pathname.replace('/api/budget/income/', '');
           if (method === 'PUT') {
             const b = (await request.json()) as any;
+            const date = (b.date && typeof b.date === 'string' && b.date.trim())
+              ? b.date.trim()
+              : new Date().toISOString().split('T')[0];
+            const month = b.month || date.substring(0, 7);
             await db.prepare(`
               UPDATE income_entries SET date = ?, month = ?, category = ?, source = ?, amount = ?, invoice_id = ?, notes = ?
               WHERE id = ?
-            `).bind(b.date, b.month || b.date.slice(0, 7), b.category, b.source, b.amount, b.invoice_id || null, b.notes || '', id).run();
+            `).bind(date, month, b.category, b.source, b.amount, b.invoice_id || null, b.notes || '', id).run();
             return jsonResponse({ success: true });
           }
           if (method === 'DELETE') {
@@ -631,31 +882,61 @@ export default {
         if (url.pathname === '/api/budget/borrow') {
           if (method === 'GET') {
             const m = url.searchParams.get('month');
-            const stmt = m
+            const stmt = m && m !== 'all'
               ? db.prepare('SELECT * FROM borrow_records WHERE month = ? ORDER BY date DESC').bind(m)
               : db.prepare('SELECT * FROM borrow_records ORDER BY date DESC');
             const { results } = await stmt.all();
-            return jsonResponse(results);
+            return jsonResponse(results || []);
           }
           if (method === 'POST') {
             const b = (await request.json()) as any;
             const id = b.id || crypto.randomUUID();
+            const date = (b.date && typeof b.date === 'string' && b.date.trim())
+              ? b.date.trim()
+              : new Date().toISOString().split('T')[0];
+            const month = b.month || date.substring(0, 7);
             await db.prepare(`
               INSERT INTO borrow_records (id, date, month, type, person, reason, amount, status)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `).bind(id, b.date, b.month || b.date.slice(0, 7), b.type, b.person, b.reason || '', b.amount, b.status || 'PENDING').run();
-            return jsonResponse({ id, success: true }, 201);
+            `).bind(id, date, month, b.type || 'BORROW', b.person || 'Person', b.reason || '', b.amount || 0, b.status || 'PENDING').run();
+            return jsonResponse({ id, month, success: true }, 201);
           }
+        }
+
+        if (url.pathname === '/api/budget/borrow/batch' && method === 'POST') {
+          const { items } = (await request.json()) as any;
+          if (!Array.isArray(items)) return errorResponse('Items array required', 400);
+          let count = 0;
+          for (const b of items) {
+            const amount = Number(b.amount) || 0;
+            if (amount <= 0 || !b.person) continue;
+            const date = (b.date && typeof b.date === 'string' && b.date.trim())
+              ? b.date.trim().substring(0, 10)
+              : new Date().toISOString().split('T')[0];
+            const month = b.month || date.substring(0, 7);
+            const id = b.id || crypto.randomUUID();
+
+            await db.prepare(`
+              INSERT INTO borrow_records (id, date, month, type, person, reason, amount, status)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `).bind(id, date, month, b.type || 'BORROW', String(b.person).trim(), b.reason || '', amount, b.status || 'PENDING').run();
+            count++;
+          }
+          return jsonResponse({ success: true, count });
         }
 
         if (url.pathname.startsWith('/api/budget/borrow/')) {
           const id = url.pathname.replace('/api/budget/borrow/', '');
           if (method === 'PUT') {
             const b = (await request.json()) as any;
+            const date = (b.date && typeof b.date === 'string' && b.date.trim())
+              ? b.date.trim()
+              : new Date().toISOString().split('T')[0];
+            const month = b.month || date.substring(0, 7);
             await db.prepare(`
               UPDATE borrow_records SET date = ?, month = ?, type = ?, person = ?, reason = ?, amount = ?, status = ?
               WHERE id = ?
-            `).bind(b.date, b.month || b.date.slice(0, 7), b.type, b.person, b.reason || '', b.amount, b.status, id).run();
+            `).bind(date, month, b.type, b.person, b.reason || '', b.amount, b.status, id).run();
             return jsonResponse({ success: true });
           }
           if (method === 'DELETE') {

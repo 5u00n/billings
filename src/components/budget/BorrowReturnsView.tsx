@@ -14,12 +14,81 @@ import {
   X,
   Search,
   Filter,
+  FileSpreadsheet,
 } from 'lucide-react';
+import { DataImportModal, FieldDefinition } from '../common/DataImportModal';
 
 interface BorrowReturnsViewProps {
   records: BorrowRecord[];
   onRefresh: () => void;
 }
+
+const BORROW_IMPORT_FIELDS: FieldDefinition[] = [
+  {
+    key: 'date',
+    label: 'Date (YYYY-MM-DD)',
+    required: true,
+    type: 'date',
+    synonyms: ['date', 'txn date', 'record date', 'day', 'dt'],
+  },
+  {
+    key: 'person',
+    label: 'Person / Party',
+    required: true,
+    type: 'string',
+    synonyms: ['person', 'name', 'party', 'borrower', 'lender', 'contact', 'friend'],
+  },
+  {
+    key: 'amount',
+    label: 'Amount (₹)',
+    required: true,
+    type: 'number',
+    synonyms: ['amount', 'amt', 'value', 'loan amount', 'total'],
+  },
+  {
+    key: 'type',
+    label: 'Type (BORROW / LENT / RETURN)',
+    required: false,
+    type: 'string',
+    synonyms: ['type', 'record type', 'kind'],
+    defaultValue: 'BORROW',
+  },
+  {
+    key: 'status',
+    label: 'Status (PENDING / SETTLED)',
+    required: false,
+    type: 'string',
+    synonyms: ['status', 'state'],
+    defaultValue: 'PENDING',
+  },
+  {
+    key: 'reason',
+    label: 'Reason / Purpose',
+    required: false,
+    type: 'string',
+    synonyms: ['reason', 'purpose', 'for', 'description', 'notes'],
+    defaultValue: '',
+  },
+];
+
+const BORROW_SAMPLE_TEMPLATE = [
+  {
+    'Date': '2026-10-10',
+    'Person': 'Alex Sharma',
+    'Amount': 5000,
+    'Type': 'BORROW',
+    'Status': 'PENDING',
+    'Reason': 'Short-term emergency cash',
+  },
+  {
+    'Date': '2026-10-12',
+    'Person': 'Rahul Verma',
+    'Amount': 3000,
+    'Type': 'LENT',
+    'Status': 'PENDING',
+    'Reason': 'Trip advance shared',
+  },
+];
 
 export const BorrowReturnsView: React.FC<BorrowReturnsViewProps> = ({
   records,
@@ -29,6 +98,7 @@ export const BorrowReturnsView: React.FC<BorrowReturnsViewProps> = ({
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDING' | 'SETTLED'>('ALL');
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<BorrowRecord | null>(null);
 
   // Form State
@@ -222,6 +292,16 @@ export const BorrowReturnsView: React.FC<BorrowReturnsViewProps> = ({
           >
             <Plus className="w-3.5 h-3.5" />
             Add Loan / Borrow
+          </Button>
+
+          {/* Import Excel / CSV Button */}
+          <Button
+            onClick={() => setIsImportModalOpen(true)}
+            variant="outline"
+            className="h-8 px-3 border-emerald-300 dark:border-emerald-800/80 bg-emerald-50/60 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/60 font-medium shadow-2xs flex items-center gap-1.5 rounded-lg text-xs cursor-pointer transition-colors"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            Import Excel / CSV
           </Button>
         </div>
       </div>
@@ -477,6 +557,22 @@ export const BorrowReturnsView: React.FC<BorrowReturnsViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Excel / CSV Import Modal */}
+      <DataImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        title="Import Borrow / Return Records from Excel / CSV"
+        description="Bulk import loans, borrowed amounts, or returns from spreadsheets"
+        entityName="Loans_and_Borrows"
+        targetFields={BORROW_IMPORT_FIELDS}
+        sampleData={BORROW_SAMPLE_TEMPLATE}
+        apiEndpoint="/api/budget/borrow/batch"
+        onSuccess={(count) => {
+          alert(`Successfully imported ${count} loan/borrow records!`);
+          onRefresh();
+        }}
+      />
     </div>
   );
 };

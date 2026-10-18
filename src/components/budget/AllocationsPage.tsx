@@ -47,8 +47,9 @@ export const AllocationsPage: React.FC = () => {
       ]);
       const allocData = await allocRes.json();
       const sumData = await sumRes.json();
-      setAllocations(allocData || []);
-      setTotalIncome(sumData?.total_inflow || sumData?.total_income || 0);
+      const list = Array.isArray(allocData) ? allocData : (allocData?.allocations || []);
+      setAllocations(list);
+      setTotalIncome(allocData?.total_income || sumData?.total_inflow || sumData?.total_income || 0);
     } catch (err) {
       console.error('Failed to load allocations:', err);
     } finally {

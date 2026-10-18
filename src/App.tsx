@@ -21,6 +21,7 @@ import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { RouterProvider, useRouter } from './context/RouterContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LoginPage } from './components/auth/LoginPage';
+import { OfflineStatusBanner } from './components/OfflineStatusBanner';
 import { Menu, Sun, Moon, Plus } from 'lucide-react';
 import { Button } from './components/ui/button';
 
@@ -347,6 +348,7 @@ export const AppContent: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
+        <OfflineStatusBanner onSync={fetchAllData} />
         {/* Mobile Top Header (only visible on < md) */}
         {!isEditorOpen && (
           <header className="md:hidden bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 py-2.5 flex items-center justify-between no-print shrink-0 shadow-2xs">

@@ -24,13 +24,79 @@ import {
   FileText,
   ChevronDown,
   ChevronUp,
+  FileSpreadsheet,
 } from 'lucide-react';
+import { DataImportModal, FieldDefinition } from '../common/DataImportModal';
 
 interface IncomeViewProps {
   incomes: IncomeEntry[];
   currentMonth: string;
   onRefresh: () => void;
 }
+
+const INCOME_IMPORT_FIELDS: FieldDefinition[] = [
+  {
+    key: 'date',
+    label: 'Date (YYYY-MM-DD)',
+    required: true,
+    type: 'date',
+    synonyms: ['date', 'txn date', 'income date', 'payment date', 'received date', 'dt', 'day'],
+  },
+  {
+    key: 'source',
+    label: 'Income Source / Client',
+    required: true,
+    type: 'string',
+    synonyms: ['source', 'client', 'payer', 'party', 'customer', 'company', 'name', 'particulars'],
+  },
+  {
+    key: 'amount',
+    label: 'Amount (₹)',
+    required: true,
+    type: 'number',
+    synonyms: ['amount', 'amt', 'received', 'credit', 'total', 'fees', 'invoice amount', 'value'],
+  },
+  {
+    key: 'category',
+    label: 'Category (fl / sal / ext / saving)',
+    required: false,
+    type: 'string',
+    synonyms: ['category', 'type', 'cat'],
+    defaultValue: 'fl',
+  },
+  {
+    key: 'notes',
+    label: 'Notes',
+    required: false,
+    type: 'string',
+    synonyms: ['notes', 'note', 'memo', 'comment', 'description'],
+    defaultValue: '',
+  },
+];
+
+const INCOME_SAMPLE_TEMPLATE = [
+  {
+    'Date': '2026-10-01',
+    'Source': 'Acme Corp Monthly Retainer',
+    'Amount': 85000,
+    'Category': 'fl',
+    'Notes': 'Web App Development Retainer',
+  },
+  {
+    'Date': '2026-10-05',
+    'Source': 'Software Engineering Monthly Salary',
+    'Amount': 110000,
+    'Category': 'sal',
+    'Notes': 'Direct bank deposit',
+  },
+  {
+    'Date': '2026-10-10',
+    'Source': 'Consulting Call',
+    'Amount': 15000,
+    'Category': 'fl',
+    'Notes': 'Architecture advisory',
+  },
+];
 
 export const IncomeView: React.FC<IncomeViewProps> = ({
   incomes,
@@ -45,6 +111,7 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
   // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [editingIncome, setEditingIncome] = useState<IncomeEntry | null>(null);
 
   // Form State for regular income
@@ -559,13 +626,21 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center">
+        <div className="flex flex-col gap-2 justify-center">
           <Button
             onClick={handleOpenNew}
-            className="w-full h-full min-h-[58px] bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white font-medium shadow-xs flex items-center justify-center gap-2 rounded-xl text-xs cursor-pointer transition-colors"
+            className="w-full py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white font-medium shadow-xs flex items-center justify-center gap-2 rounded-xl text-xs cursor-pointer transition-colors"
           >
             <Plus className="w-4 h-4" />
             Add Direct Income Stream
+          </Button>
+          <Button
+            onClick={() => setIsImportModalOpen(true)}
+            variant="outline"
+            className="w-full py-2 border-emerald-300 dark:border-emerald-800/80 bg-emerald-50/60 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/60 font-medium shadow-2xs flex items-center justify-center gap-2 rounded-xl text-xs cursor-pointer transition-colors"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            Import Excel / CSV
           </Button>
         </div>
       </div>
@@ -968,6 +1043,22 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Excel / CSV Import Modal */}
+      <DataImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        title="Import Income Records from Excel / CSV"
+        description="Bulk import client fees, salary, or personal inflow records"
+        entityName="Income"
+        targetFields={INCOME_IMPORT_FIELDS}
+        sampleData={INCOME_SAMPLE_TEMPLATE}
+        apiEndpoint="/api/budget/income/batch"
+        onSuccess={(count) => {
+          alert(`Successfully imported ${count} income entries!`);
+          onRefresh();
+        }}
+      />
     </div>
   );
 };

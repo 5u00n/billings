@@ -1,18 +1,58 @@
 import React, { useState } from 'react';
 import { CatalogItem } from '../types';
 import { formatINR } from '../utils/numberToWords';
-import { Package, Plus, Trash2, X } from 'lucide-react';
+import { Package, Plus, Trash2, X, FileSpreadsheet } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
+import { DataImportModal, FieldDefinition } from './common/DataImportModal';
 
 interface ItemsCatalogProps {
   catalog: CatalogItem[];
   onRefresh: () => void;
 }
 
+const CATALOG_IMPORT_FIELDS: FieldDefinition[] = [
+  {
+    key: 'name',
+    label: 'Item / Service Name',
+    required: true,
+    type: 'string',
+    synonyms: ['name', 'item', 'service', 'title', 'product'],
+  },
+  {
+    key: 'description',
+    label: 'Description / Details',
+    required: false,
+    type: 'string',
+    synonyms: ['description', 'particulars', 'narration', 'details', 'memo'],
+    defaultValue: '',
+  },
+  {
+    key: 'default_rate',
+    label: 'Rate / Price (₹)',
+    required: true,
+    type: 'number',
+    synonyms: ['rate', 'default_rate', 'price', 'amount', 'unit price', 'cost'],
+  },
+];
+
+const CATALOG_SAMPLE_TEMPLATE = [
+  {
+    'Item Name': 'Fullstack Web App Development Milestone',
+    'Description': 'Frontend & backend sprint delivery with cloud deployment',
+    'Rate': 45000,
+  },
+  {
+    'Item Name': 'Cloud Architecture Consulting (Hourly)',
+    'Description': 'Infrastructure advisory and serverless scalability review',
+    'Rate': 3500,
+  },
+];
+
 export const ItemsCatalog: React.FC<ItemsCatalogProps> = ({ catalog, onRefresh }) => {
   const [showModal, setShowModal] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [rate, setRate] = useState<number>(0);
@@ -43,20 +83,30 @@ export const ItemsCatalog: React.FC<ItemsCatalogProps> = ({ catalog, onRefresh }
 
   return (
     <div className="p-8  space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Services & Items Catalog</h1>
           <p className="text-xs text-slate-500 mt-0.5">
             Save recurring project milestones, fees, and consulting rates for 1-click billing.
           </p>
         </div>
-        <Button
-          onClick={() => setShowModal(true)}
-          className="gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-xs"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Add Catalog Item</span>
-        </Button>
+        <div className="flex items-center gap-2.5">
+          <Button
+            onClick={() => setIsImportModalOpen(true)}
+            variant="outline"
+            className="gap-2 border-emerald-300 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/60 font-semibold shadow-2xs cursor-pointer"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span>Import Excel / CSV</span>
+          </Button>
+          <Button
+            onClick={() => setShowModal(true)}
+            className="gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-xs cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Catalog Item</span>
+          </Button>
+        </div>
       </div>
 
       <Card className="shadow-2xs overflow-hidden">
@@ -175,6 +225,22 @@ export const ItemsCatalog: React.FC<ItemsCatalogProps> = ({ catalog, onRefresh }
           </div>
         </div>
       )}
+
+      {/* Excel / CSV Import Modal */}
+      <DataImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        title="Import Products & Services from Excel / CSV"
+        description="Bulk import your price lists and service catalog items from spreadsheets"
+        entityName="Catalog_Items"
+        targetFields={CATALOG_IMPORT_FIELDS}
+        sampleData={CATALOG_SAMPLE_TEMPLATE}
+        apiEndpoint="/api/catalog/batch"
+        onSuccess={(count) => {
+          alert(`Successfully imported ${count} catalog items!`);
+          onRefresh();
+        }}
+      />
     </div>
   );
 };

@@ -671,6 +671,36 @@ app.post('/api/catalog', (req: Request, res: Response) => {
   res.json({ success: true, id });
 });
 
+// Bulk Import Catalog Items
+app.post('/api/catalog/batch', (req: Request, res: Response) => {
+  const { items } = req.body;
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Items array is required' });
+  }
+
+  try {
+    const insertStmt = db.prepare('INSERT INTO catalog_items (id, name, description, default_rate) VALUES (?, ?, ?, ?)');
+    let importedCount = 0;
+    const insertMany = db.transaction((records: any[]) => {
+      for (const item of records) {
+        if (!item.name && !item.description) continue;
+        const id = item.id || `cat-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const name = String(item.name || item.description || 'Item').trim();
+        const description = String(item.description || '').trim();
+        const defaultRate = Number(item.default_rate || item.rate || 0);
+
+        insertStmt.run(id, name, description, defaultRate);
+        importedCount++;
+      }
+    });
+
+    insertMany(items);
+    res.json({ success: true, count: importedCount });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.delete('/api/catalog/:id', (req: Request, res: Response) => {
   db.prepare('DELETE FROM catalog_items WHERE id = ?').run(req.params.id);
   res.json({ success: true });
@@ -1467,134 +1497,50 @@ app.post('/api/recurring/run-due', (_req: Request, res: Response) => {
 // ----------------- BUDGET & EXPENSE SYSTEM API -----------------
 
 // Get all active / available months
+function getAvailableMonths(): string[] {
+  const expMonths = db.prepare('SELECT DISTINCT month FROM expenses').all() as { month: string }[];
+  const incMonths = db.prepare('SELECT DISTINCT month FROM income_entries').all() as { month: string }[];
+  const sumMonths = db.prepare('SELECT DISTINCT month FROM monthly_budget_summaries').all() as { month: string }[];
+
+  const monthSet = new Set<string>();
+  expMonths.forEach((m) => m.month && monthSet.add(m.month));
+  incMonths.forEach((m) => m.month && monthSet.add(m.month));
+  sumMonths.forEach((m) => m.month && monthSet.add(m.month));
+
+  // Ensure current month is always present
+  const currentMonth = new Date().toISOString().substring(0, 7);
+  monthSet.add(currentMonth);
+
+  return Array.from(monthSet).sort().reverse();
+}
+
 app.get('/api/budget/months', (_req: Request, res: Response) => {
   try {
-    const expMonths = db.prepare('SELECT DISTINCT month FROM expenses').all() as { month: string }[];
-    const incMonths = db.prepare('SELECT DISTINCT month FROM income_entries').all() as { month: string }[];
-    const sumMonths = db.prepare('SELECT DISTINCT month FROM monthly_budget_summaries').all() as { month: string }[];
-
-    const monthSet = new Set<string>();
-    expMonths.forEach((m) => m.month && monthSet.add(m.month));
-    incMonths.forEach((m) => m.month && monthSet.add(m.month));
-    sumMonths.forEach((m) => m.month && monthSet.add(m.month));
-
-    // Ensure current month is always present
-    const currentMonth = new Date().toISOString().substring(0, 7);
-    monthSet.add(currentMonth);
-
-    const sorted = Array.from(monthSet).sort().reverse();
+    const sorted = getAvailableMonths();
     res.json(sorted);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Get monthly aggregated cashflow summary
-app.get('/api/budget/summary', (req: Request, res: Response) => {
-  const month = (req.query.month as string) || new Date().toISOString().substring(0, 7);
+function calculateBudgetSummary(month: string) {
+  if (month === 'all') {
+    // Aggregate across all months for lifetime overview
+    const earliestSummary: any = db.prepare('SELECT starting_debt, previous_remaining FROM monthly_budget_summaries ORDER BY month ASC LIMIT 1').get();
+    const startingDebt = earliestSummary?.starting_debt || 0;
+    const previousRemaining = earliestSummary?.previous_remaining || 0;
 
-  try {
-    if (month === 'all') {
-      // Aggregate across all months for lifetime overview
-      const earliestSummary: any = db.prepare('SELECT starting_debt, previous_remaining FROM monthly_budget_summaries ORDER BY month ASC LIMIT 1').get();
-      const startingDebt = earliestSummary?.starting_debt || 0;
-      const previousRemaining = earliestSummary?.previous_remaining || 0;
+    const sumTotals: any = db.prepare(`
+      SELECT 
+        SUM(dept_payment) as total_debt_paid,
+        SUM(borrow_amount) as total_borrow_summary,
+        SUM(reg_savings) as total_reg_savings,
+        SUM(ext_savings) as total_ext_savings
+      FROM monthly_budget_summaries
+    `).get();
 
-      const sumTotals: any = db.prepare(`
-        SELECT 
-          SUM(dept_payment) as total_debt_paid,
-          SUM(borrow_amount) as total_borrow_summary,
-          SUM(reg_savings) as total_reg_savings,
-          SUM(ext_savings) as total_ext_savings
-        FROM monthly_budget_summaries
-      `).get();
-
-      // Aggregate all expenses
-      const expRows: any[] = db.prepare('SELECT category, SUM(amount) as total FROM expenses GROUP BY category').all();
-      let regExpense = 0;
-      let extExpense = 0;
-      expRows.forEach((r) => {
-        if (r.category === 'reg') regExpense = r.total || 0;
-        else extExpense += r.total || 0;
-      });
-      const totalExpense = regExpense + extExpense;
-
-      // Aggregate all income
-      const incRows: any[] = db.prepare('SELECT category, SUM(amount) as total FROM income_entries GROUP BY category').all();
-      let salary = 0;
-      let freelance = 0;
-      let returns = 0;
-      let extIncome = 0;
-      incRows.forEach((r) => {
-        if (r.category === 'sal') salary = r.total || 0;
-        else if (r.category === 'fl') freelance = r.total || 0;
-        else if (r.category === 'rt') returns = r.total || 0;
-        else extIncome += r.total || 0;
-      });
-
-      const borrowRetRow: any = db.prepare('SELECT SUM(amount) as total FROM borrow_records WHERE type = ?').get('RETURN');
-      if (borrowRetRow && borrowRetRow.total) {
-        returns = Math.max(returns, borrowRetRow.total);
-      }
-
-      const borrowRow: any = db.prepare('SELECT SUM(amount) as total FROM borrow_records WHERE type = ?').get('BORROW');
-      const autoBorrow = borrowRow && borrowRow.total ? borrowRow.total : 0;
-      const finalBorrow = sumTotals?.total_borrow_summary || autoBorrow;
-
-      const totalIncomeEarned = salary + freelance + returns + extIncome;
-      const totalInflow = previousRemaining + totalIncomeEarned;
-      const debtPayment = sumTotals?.total_debt_paid || 0;
-
-      const overhead = (totalInflow + finalBorrow) - (totalExpense + debtPayment);
-      const overheadSavings = overhead > 0 ? Math.round(overhead / 2) : 0;
-      const totalSavings = (sumTotals?.total_reg_savings || 0) + (sumTotals?.total_ext_savings || 0) + overheadSavings;
-      const remaining = overhead - overheadSavings;
-      const endingDebt = startingDebt + finalBorrow - debtPayment;
-
-      return res.json({
-        month: 'all',
-        starting_debt: startingDebt,
-        previous_remaining: previousRemaining,
-        salary,
-        freelance,
-        returns,
-        ext_income: extIncome,
-        total_income_earned: totalIncomeEarned,
-        total_income: totalInflow,
-        total_inflow: totalInflow,
-        reg_savings: sumTotals?.total_reg_savings || 0,
-        ext_savings: sumTotals?.total_ext_savings || 0,
-        reg_expense: regExpense,
-        ext_expense: extExpense,
-        total_expense: totalExpense,
-        dept_payment: debtPayment,
-        borrow_amount: finalBorrow,
-        overhead,
-        overhead_savings: overheadSavings,
-        total_savings: totalSavings,
-        remaining,
-        ending_debt: endingDebt,
-        notes: 'All-time lifetime aggregated summary',
-      });
-    }
-
-    // 1. Get or create manual summary record
-    let summary: any = db.prepare('SELECT * FROM monthly_budget_summaries WHERE month = ?').get(month);
-    if (!summary) {
-      summary = {
-        month,
-        starting_debt: 0,
-        previous_remaining: 0,
-        dept_payment: 0,
-        borrow_amount: 0,
-        reg_savings: 0,
-        ext_savings: 0,
-        notes: '',
-      };
-    }
-
-    // 2. Aggregate expenses
-    const expRows: any[] = db.prepare('SELECT category, SUM(amount) as total FROM expenses WHERE month = ? GROUP BY category').all(month);
+    // Aggregate all expenses
+    const expRows: any[] = db.prepare('SELECT category, SUM(amount) as total FROM expenses GROUP BY category').all();
     let regExpense = 0;
     let extExpense = 0;
     expRows.forEach((r) => {
@@ -1603,8 +1549,8 @@ app.get('/api/budget/summary', (req: Request, res: Response) => {
     });
     const totalExpense = regExpense + extExpense;
 
-    // 3. Aggregate income
-    const incRows: any[] = db.prepare('SELECT category, SUM(amount) as total FROM income_entries WHERE month = ? GROUP BY category').all(month);
+    // Aggregate all income
+    const incRows: any[] = db.prepare('SELECT category, SUM(amount) as total FROM income_entries GROUP BY category').all();
     let salary = 0;
     let freelance = 0;
     let returns = 0;
@@ -1616,36 +1562,28 @@ app.get('/api/budget/summary', (req: Request, res: Response) => {
       else extIncome += r.total || 0;
     });
 
-    // Also include Returns from borrow_records if any
-    const borrowRetRow: any = db
-      .prepare('SELECT SUM(amount) as total FROM borrow_records WHERE month = ? AND type = ?')
-      .get(month, 'RETURN');
+    const borrowRetRow: any = db.prepare('SELECT SUM(amount) as total FROM borrow_records WHERE type = ?').get('RETURN');
     if (borrowRetRow && borrowRetRow.total) {
       returns = Math.max(returns, borrowRetRow.total);
     }
 
-    // Also check new borrow amount from borrow_records
-    const borrowRow: any = db
-      .prepare('SELECT SUM(amount) as total FROM borrow_records WHERE month = ? AND type = ?')
-      .get(month, 'BORROW');
+    const borrowRow: any = db.prepare('SELECT SUM(amount) as total FROM borrow_records WHERE type = ?').get('BORROW');
     const autoBorrow = borrowRow && borrowRow.total ? borrowRow.total : 0;
-    const finalBorrow = summary.borrow_amount || autoBorrow;
+    const finalBorrow = sumTotals?.total_borrow_summary || autoBorrow;
 
-    const previousRemaining = summary.previous_remaining || 0;
     const totalIncomeEarned = salary + freelance + returns + extIncome;
     const totalInflow = previousRemaining + totalIncomeEarned;
-    const debtPayment = summary.dept_payment || 0;
+    const debtPayment = sumTotals?.total_debt_paid || 0;
 
-    // Excel formula: Overhead = (Total Inflow + Borrow) - (Total Outflow + Debt Paid)
     const overhead = (totalInflow + finalBorrow) - (totalExpense + debtPayment);
     const overheadSavings = overhead > 0 ? Math.round(overhead / 2) : 0;
-    const totalSavings = (summary.reg_savings || 0) + (summary.ext_savings || 0) + overheadSavings;
+    const totalSavings = (sumTotals?.total_reg_savings || 0) + (sumTotals?.total_ext_savings || 0) + overheadSavings;
     const remaining = overhead - overheadSavings;
-    const endingDebt = (summary.starting_debt || 0) + finalBorrow - debtPayment;
+    const endingDebt = startingDebt + finalBorrow - debtPayment;
 
-    res.json({
-      month,
-      starting_debt: summary.starting_debt || 0,
+    return {
+      month: 'all',
+      starting_debt: startingDebt,
       previous_remaining: previousRemaining,
       salary,
       freelance,
@@ -1654,20 +1592,120 @@ app.get('/api/budget/summary', (req: Request, res: Response) => {
       total_income_earned: totalIncomeEarned,
       total_income: totalInflow,
       total_inflow: totalInflow,
-      reg_savings: summary.reg_savings || 0,
-      ext_savings: summary.ext_savings || 0,
-      overhead_savings: overheadSavings,
-      total_savings: totalSavings,
+      reg_savings: sumTotals?.total_reg_savings || 0,
+      ext_savings: sumTotals?.total_ext_savings || 0,
       reg_expense: regExpense,
       ext_expense: extExpense,
       total_expense: totalExpense,
       dept_payment: debtPayment,
       borrow_amount: finalBorrow,
       overhead,
+      overhead_savings: overheadSavings,
+      total_savings: totalSavings,
       remaining,
       ending_debt: endingDebt,
-      notes: summary.notes || '',
-    });
+      notes: 'All-time lifetime aggregated summary',
+    };
+  }
+
+  // 1. Get or create manual summary record
+  let summary: any = db.prepare('SELECT * FROM monthly_budget_summaries WHERE month = ?').get(month);
+  if (!summary) {
+    summary = {
+      month,
+      starting_debt: 0,
+      previous_remaining: 0,
+      dept_payment: 0,
+      borrow_amount: 0,
+      reg_savings: 0,
+      ext_savings: 0,
+      notes: '',
+    };
+  }
+
+  // 2. Aggregate expenses
+  const expRows: any[] = db.prepare('SELECT category, SUM(amount) as total FROM expenses WHERE month = ? GROUP BY category').all(month);
+  let regExpense = 0;
+  let extExpense = 0;
+  expRows.forEach((r) => {
+    if (r.category === 'reg') regExpense = r.total || 0;
+    else extExpense += r.total || 0;
+  });
+  const totalExpense = regExpense + extExpense;
+
+  // 3. Aggregate income
+  const incRows: any[] = db.prepare('SELECT category, SUM(amount) as total FROM income_entries WHERE month = ? GROUP BY category').all(month);
+  let salary = 0;
+  let freelance = 0;
+  let returns = 0;
+  let extIncome = 0;
+  incRows.forEach((r) => {
+    if (r.category === 'sal') salary = r.total || 0;
+    else if (r.category === 'fl') freelance = r.total || 0;
+    else if (r.category === 'rt') returns = r.total || 0;
+    else extIncome += r.total || 0;
+  });
+
+  // Also include Returns from borrow_records if any
+  const borrowRetRow: any = db
+    .prepare('SELECT SUM(amount) as total FROM borrow_records WHERE month = ? AND type = ?')
+    .get(month, 'RETURN');
+  if (borrowRetRow && borrowRetRow.total) {
+    returns = Math.max(returns, borrowRetRow.total);
+  }
+
+  // Also check new borrow amount from borrow_records
+  const borrowRow: any = db
+    .prepare('SELECT SUM(amount) as total FROM borrow_records WHERE month = ? AND type = ?')
+    .get(month, 'BORROW');
+  const autoBorrow = borrowRow && borrowRow.total ? borrowRow.total : 0;
+  const finalBorrow = summary.borrow_amount || autoBorrow;
+
+  const previousRemaining = summary.previous_remaining || 0;
+  const totalIncomeEarned = salary + freelance + returns + extIncome;
+  const totalInflow = previousRemaining + totalIncomeEarned;
+  const debtPayment = summary.dept_payment || 0;
+
+  // Excel formula: Overhead = (Total Inflow + Borrow) - (Total Outflow + Debt Paid)
+  const overhead = (totalInflow + finalBorrow) - (totalExpense + debtPayment);
+  const overheadSavings = overhead > 0 ? Math.round(overhead / 2) : 0;
+  const totalSavings = (summary.reg_savings || 0) + (summary.ext_savings || 0) + overheadSavings;
+  const remaining = overhead - overheadSavings;
+  const endingDebt = (summary.starting_debt || 0) + finalBorrow - debtPayment;
+
+  return {
+    month,
+    starting_debt: summary.starting_debt || 0,
+    previous_remaining: previousRemaining,
+    salary,
+    freelance,
+    returns,
+    ext_income: extIncome,
+    total_income_earned: totalIncomeEarned,
+    total_income: totalInflow,
+    total_inflow: totalInflow,
+    reg_savings: summary.reg_savings || 0,
+    ext_savings: summary.ext_savings || 0,
+    overhead_savings: overheadSavings,
+    total_savings: totalSavings,
+    reg_expense: regExpense,
+    ext_expense: extExpense,
+    total_expense: totalExpense,
+    dept_payment: debtPayment,
+    borrow_amount: finalBorrow,
+    overhead,
+    remaining,
+    ending_debt: endingDebt,
+    notes: summary.notes || '',
+  };
+}
+
+// Get monthly aggregated cashflow summary
+app.get('/api/budget/summary', (req: Request, res: Response) => {
+  const month = (req.query.month as string) || new Date().toISOString().substring(0, 7);
+  try {
+    const summary = calculateBudgetSummary(month);
+    res.json(summary);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -2067,9 +2105,19 @@ app.get('/api/budget/expenses', (req: Request, res: Response) => {
 
 app.post('/api/budget/expenses', (req: Request, res: Response) => {
   const body = req.body;
-  const id = body.id || `exp-${Date.now()}`;
-  const date = body.date || new Date().toISOString().split('T')[0];
+  const id = body.id || `exp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const date = (body.date && typeof body.date === 'string' && body.date.trim())
+    ? body.date.trim()
+    : new Date().toISOString().split('T')[0];
   const month = body.month || date.substring(0, 7);
+
+  if (!body.description || !body.description.trim()) {
+    return res.status(400).json({ error: 'Description is required' });
+  }
+  const amount = Number(body.amount);
+  if (isNaN(amount) || amount <= 0) {
+    return res.status(400).json({ error: 'Valid positive amount is required' });
+  }
 
   try {
     const taxClass = body.tax_classification || (
@@ -2092,8 +2140,8 @@ app.post('/api/budget/expenses', (req: Request, res: Response) => {
       month,
       body.category || 'ext',
       body.tag || 'General',
-      body.description || 'Expense',
-      Number(body.amount) || 0,
+      body.description.trim(),
+      amount,
       body.payment_method || 'UPI / Bank',
       body.notes || '',
       taxClass,
@@ -2103,9 +2151,72 @@ app.post('/api/budget/expenses', (req: Request, res: Response) => {
       body.has_invoice_voucher !== undefined ? (body.has_invoice_voucher ? 1 : 0) : 1,
       body.voucher_ref || ''
     );
-    res.json({ success: true, id });
+    res.json({ success: true, id, month });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// Bulk Import Expenses
+app.post('/api/budget/expenses/batch', (req: Request, res: Response) => {
+  const { items } = req.body;
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Items array is required' });
+  }
+
+  try {
+    const insertStmt = db.prepare(`
+      INSERT INTO expenses (id, date, month, category, tag, description, amount, payment_method, notes, tax_classification, business_percentage, gst_rate, gst_itc_eligible, has_invoice_voucher, voucher_ref)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    let importedCount = 0;
+    const insertMany = db.transaction((records: any[]) => {
+      for (const b of records) {
+        const date = (b.date && typeof b.date === 'string' && b.date.trim())
+          ? b.date.trim().substring(0, 10)
+          : new Date().toISOString().split('T')[0];
+        const month = b.month || date.substring(0, 7);
+        const id = b.id || `exp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const amount = Number(b.amount) || 0;
+        if (amount <= 0 || !b.description) continue;
+
+        const taxClass = b.tax_classification || (
+          ['Food', 'Groceries', 'Personal', 'Shopping', 'Cosmetics'].includes(b.tag)
+            ? 'PERSONAL_DRAWINGS'
+            : ['Gadgets', 'Equipment'].includes(b.tag)
+            ? 'CAPITAL_ASSET'
+            : ['Fuel', 'Travel', 'Recharge', 'Internet'].includes(b.tag)
+            ? 'MIXED_APPORTIONED'
+            : 'BUSINESS_DEDUCTIBLE'
+        );
+        const busPct = b.business_percentage !== undefined ? Number(b.business_percentage) : (taxClass === 'MIXED_APPORTIONED' ? 70 : 100);
+
+        insertStmt.run(
+          id,
+          date,
+          month,
+          b.category === 'reg' ? 'reg' : 'ext',
+          b.tag || 'General',
+          String(b.description).trim(),
+          amount,
+          b.payment_method || 'UPI / Bank',
+          b.notes || '',
+          taxClass,
+          busPct,
+          Number(b.gst_rate) || 0,
+          b.gst_itc_eligible ? 1 : 0,
+          b.has_invoice_voucher !== undefined ? (b.has_invoice_voucher ? 1 : 0) : 1,
+          b.voucher_ref || ''
+        );
+        importedCount++;
+      }
+    });
+
+    insertMany(items);
+    res.json({ success: true, count: importedCount });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -2209,6 +2320,51 @@ app.post('/api/budget/income', (req: Request, res: Response) => {
   }
 });
 
+// Bulk Import Income
+app.post('/api/budget/income/batch', (req: Request, res: Response) => {
+  const { items } = req.body;
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Items array is required' });
+  }
+
+  try {
+    const insertStmt = db.prepare(`
+      INSERT INTO income_entries (id, date, month, category, source, amount, invoice_id, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    let importedCount = 0;
+    const insertMany = db.transaction((records: any[]) => {
+      for (const b of records) {
+        const date = (b.date && typeof b.date === 'string' && b.date.trim())
+          ? b.date.trim().substring(0, 10)
+          : new Date().toISOString().split('T')[0];
+        const month = b.month || date.substring(0, 7);
+        const id = b.id || `inc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const amount = Number(b.amount) || 0;
+        if (amount <= 0 || !b.source) continue;
+
+        insertStmt.run(
+          id,
+          date,
+          month,
+          b.category || 'fl',
+          String(b.source).trim(),
+          amount,
+          b.invoice_id || null,
+          b.notes || ''
+        );
+        importedCount++;
+      }
+    });
+
+    insertMany(items);
+    res.json({ success: true, count: importedCount });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.put('/api/budget/income/:id', (req: Request, res: Response) => {
   const body = req.body;
   try {
@@ -2302,6 +2458,51 @@ app.post('/api/budget/borrow', (req: Request, res: Response) => {
     res.json({ success: true, id });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// Bulk Import Borrow & Return Records
+app.post('/api/budget/borrow/batch', (req: Request, res: Response) => {
+  const { items } = req.body;
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Items array is required' });
+  }
+
+  try {
+    const insertStmt = db.prepare(`
+      INSERT INTO borrow_records (id, date, month, type, person, reason, amount, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    let importedCount = 0;
+    const insertMany = db.transaction((records: any[]) => {
+      for (const b of records) {
+        const date = (b.date && typeof b.date === 'string' && b.date.trim())
+          ? b.date.trim().substring(0, 10)
+          : new Date().toISOString().split('T')[0];
+        const month = b.month || date.substring(0, 7);
+        const id = b.id || `br-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const amount = Number(b.amount) || 0;
+        if (amount <= 0 || !b.person) continue;
+
+        insertStmt.run(
+          id,
+          date,
+          month,
+          b.type || 'BORROW',
+          String(b.person).trim(),
+          b.reason || '',
+          amount,
+          b.status || 'PENDING'
+        );
+        importedCount++;
+      }
+    });
+
+    insertMany(items);
+    res.json({ success: true, count: importedCount });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -2432,82 +2633,121 @@ app.delete('/api/budget/goals/:id', (req: Request, res: Response) => {
   }
 });
 
+function calculateBudgetAllocations(month: string) {
+  const isAll = month === 'all';
+  // Get total income for month consistent with summary
+  const incQuery = isAll
+    ? 'SELECT category, SUM(amount) as total FROM income_entries GROUP BY category'
+    : 'SELECT category, SUM(amount) as total FROM income_entries WHERE month = ? GROUP BY category';
+  const incParams = isAll ? [] : [month];
+  const incRows: any[] = db.prepare(incQuery).all(...incParams);
+
+  let incSum = 0;
+  let rtFromInc = 0;
+  incRows.forEach((r) => {
+    incSum += r.total || 0;
+    if (r.category === 'rt') rtFromInc = r.total || 0;
+  });
+
+  const borrowRetQuery = isAll
+    ? 'SELECT SUM(amount) as total FROM borrow_records WHERE type = ?'
+    : 'SELECT SUM(amount) as total FROM borrow_records WHERE month = ? AND type = ?';
+  const borrowRetParams = isAll ? ['RETURN'] : [month, 'RETURN'];
+  const borrowRetRow: any = db.prepare(borrowRetQuery).get(...borrowRetParams);
+  const rtFromBorrow = borrowRetRow?.total || 0;
+  const returnsToAdd = Math.max(0, rtFromBorrow - rtFromInc);
+
+  const totalIncomeEarned = incSum + returnsToAdd;
+  let previousRemaining = 0;
+  if (isAll) {
+    const earliestSummary: any = db.prepare('SELECT previous_remaining FROM monthly_budget_summaries ORDER BY month ASC LIMIT 1').get();
+    previousRemaining = earliestSummary?.previous_remaining || 0;
+  } else {
+    const sumRow: any = db.prepare('SELECT previous_remaining FROM monthly_budget_summaries WHERE month = ?').get(month);
+    previousRemaining = sumRow?.previous_remaining || 0;
+  }
+  const totalIncome = totalIncomeEarned + previousRemaining;
+
+  const rules: any[] = db.prepare('SELECT * FROM budget_allocation_rules ORDER BY display_order ASC').all();
+  const expQuery = isAll
+    ? 'SELECT tag, category, SUM(amount) as spent FROM expenses GROUP BY tag, category'
+    : 'SELECT tag, category, SUM(amount) as spent FROM expenses WHERE month = ? GROUP BY tag, category';
+  const expParams = isAll ? [] : [month];
+  const expenses: any[] = db.prepare(expQuery).all(...expParams);
+
+  // Map rules to actual spending
+  const allocations = rules.map((r) => {
+    const planned = Math.round(totalIncome * r.percentage);
+    let actual = 0;
+
+    if (r.category === 'Essentials') {
+      const match = expenses.find((e) => e.category === 'reg');
+      actual = match ? match.spent : 0;
+    } else if (r.category === 'Small Assets') {
+      const match = expenses.find((e) => e.tag === 'Gadgets' || e.tag === 'Accessories');
+      actual = match ? match.spent : 0;
+    } else if (r.category === 'Business Growth') {
+      const match = expenses.find((e) => e.tag === 'Services' || e.tag === 'Hosting' || e.tag === 'Tools');
+      actual = match ? match.spent : 0;
+    }
+
+    return {
+      ...r,
+      planned_amount: planned,
+      actual_spent: actual,
+      variance: planned - actual,
+    };
+  });
+
+  return {
+    month,
+    total_income: totalIncome,
+    allocations,
+  };
+}
+
+// ----------------- CONSOLIDATED MONTH BUNDLE (Single Roundtrip) -----------------
+app.get('/api/budget/month-bundle', (req: Request, res: Response) => {
+  const month = (req.query.month as string) || new Date().toISOString().substring(0, 7);
+  try {
+    const isAll = month === 'all';
+    const summary = calculateBudgetSummary(month);
+    const expenses = isAll
+      ? db.prepare('SELECT * FROM expenses ORDER BY date DESC').all()
+      : db.prepare('SELECT * FROM expenses WHERE month = ? ORDER BY date DESC').all(month);
+    const incomes = isAll
+      ? db.prepare('SELECT * FROM income_entries ORDER BY date DESC').all()
+      : db.prepare('SELECT * FROM income_entries WHERE month = ? ORDER BY date DESC').all(month);
+    const borrows = isAll
+      ? db.prepare('SELECT * FROM borrow_records ORDER BY date DESC').all()
+      : db.prepare('SELECT * FROM borrow_records WHERE month = ? ORDER BY date DESC').all(month);
+    const goals = db.prepare('SELECT * FROM financial_goals ORDER BY target_amount DESC').all();
+    const allocResult = calculateBudgetAllocations(month);
+    const months = getAvailableMonths();
+
+    res.json({
+      month,
+      summary,
+      expenses,
+      incomes,
+      borrows,
+      goals,
+      allocations: allocResult.allocations,
+      total_income: allocResult.total_income,
+      months,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ----------------- BUDGET ALLOCATIONS (Planned vs Actual) -----------------
 
 app.get('/api/budget/allocations', (req: Request, res: Response) => {
   const month = (req.query.month as string) || new Date().toISOString().substring(0, 7);
   try {
-    const isAll = month === 'all';
-    // Get total income for month consistent with summary
-    const incQuery = isAll
-      ? 'SELECT category, SUM(amount) as total FROM income_entries GROUP BY category'
-      : 'SELECT category, SUM(amount) as total FROM income_entries WHERE month = ? GROUP BY category';
-    const incParams = isAll ? [] : [month];
-    const incRows: any[] = db.prepare(incQuery).all(...incParams);
-
-    let incSum = 0;
-    let rtFromInc = 0;
-    incRows.forEach((r) => {
-      incSum += r.total || 0;
-      if (r.category === 'rt') rtFromInc = r.total || 0;
-    });
-
-    const borrowRetQuery = isAll
-      ? 'SELECT SUM(amount) as total FROM borrow_records WHERE type = ?'
-      : 'SELECT SUM(amount) as total FROM borrow_records WHERE month = ? AND type = ?';
-    const borrowRetParams = isAll ? ['RETURN'] : [month, 'RETURN'];
-    const borrowRetRow: any = db.prepare(borrowRetQuery).get(...borrowRetParams);
-    const rtFromBorrow = borrowRetRow?.total || 0;
-    const returnsToAdd = Math.max(0, rtFromBorrow - rtFromInc);
-
-    const totalIncomeEarned = incSum + returnsToAdd;
-    let previousRemaining = 0;
-    if (isAll) {
-      const earliestSummary: any = db.prepare('SELECT previous_remaining FROM monthly_budget_summaries ORDER BY month ASC LIMIT 1').get();
-      previousRemaining = earliestSummary?.previous_remaining || 0;
-    } else {
-      const sumRow: any = db.prepare('SELECT previous_remaining FROM monthly_budget_summaries WHERE month = ?').get(month);
-      previousRemaining = sumRow?.previous_remaining || 0;
-    }
-    const totalIncome = totalIncomeEarned + previousRemaining;
-
-    const rules: any[] = db.prepare('SELECT * FROM budget_allocation_rules ORDER BY display_order ASC').all();
-    const expQuery = isAll
-      ? 'SELECT tag, category, SUM(amount) as spent FROM expenses GROUP BY tag, category'
-      : 'SELECT tag, category, SUM(amount) as spent FROM expenses WHERE month = ? GROUP BY tag, category';
-    const expParams = isAll ? [] : [month];
-    const expenses: any[] = db.prepare(expQuery).all(...expParams);
-
-    // Map rules to actual spending
-    const allocations = rules.map((r) => {
-      const planned = Math.round(totalIncome * r.percentage);
-      let actual = 0;
-
-      if (r.category === 'Essentials') {
-        // Reg expenses or tags like groceries, fuel, recharge, utility
-        const match = expenses.find((e) => e.category === 'reg');
-        actual = match ? match.spent : 0;
-      } else if (r.category === 'Small Assets') {
-        const match = expenses.find((e) => e.tag === 'Gadgets' || e.tag === 'Accessories');
-        actual = match ? match.spent : 0;
-      } else if (r.category === 'Business Growth') {
-        const match = expenses.find((e) => e.tag === 'Services' || e.tag === 'Hosting' || e.tag === 'Tools');
-        actual = match ? match.spent : 0;
-      }
-
-      return {
-        ...r,
-        planned_amount: planned,
-        actual_spent: actual,
-        variance: planned - actual,
-      };
-    });
-
-    res.json({
-      month,
-      total_income: totalIncome,
-      allocations,
-    });
+    const allocResult = calculateBudgetAllocations(month);
+    res.json(allocResult);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

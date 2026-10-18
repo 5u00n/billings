@@ -144,40 +144,82 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
   const loadMonthData = async (m: string) => {
     try {
       setLoading(true);
-      const [sumRes, expRes, incRes, brRes, goalRes, allocRes] = await Promise.all([
-        fetch(`/api/budget/summary?month=${m}`),
-        fetch(`/api/budget/expenses?month=${m}`),
-        fetch(`/api/budget/income?month=${m}`),
-        fetch(`/api/budget/borrow?month=${m}`),
-        fetch('/api/budget/goals'),
-        fetch(`/api/budget/allocations?month=${m}`),
-      ]);
 
-      const [sumData, expData, incData, brData, goalData, allocData] = await Promise.all([
-        sumRes.json(),
-        expRes.json(),
-        incRes.json(),
-        brRes.json(),
-        goalRes.json(),
-        allocRes.json(),
-      ]);
+      // Attempt fast single-roundtrip bundle fetch
+      let bundleLoaded = false;
+      try {
+        const bundleRes = await fetch(`/api/budget/month-bundle?month=${m}`);
+        if (bundleRes.ok) {
+          const bundle = await bundleRes.json();
+          if (bundle && bundle.summary !== undefined) {
+            setSummary(bundle.summary);
+            setExpenses(Array.isArray(bundle.expenses) ? bundle.expenses : []);
+            setIncomes(Array.isArray(bundle.incomes) ? bundle.incomes : []);
+            setBorrows(Array.isArray(bundle.borrows) ? bundle.borrows : []);
+            setGoals(Array.isArray(bundle.goals) ? bundle.goals : []);
+            setAllocations(Array.isArray(bundle.allocations) ? bundle.allocations : []);
+            setTotalIncomeBase(bundle.total_income || 0);
 
-      setSummary(sumData);
-      setExpenses(Array.isArray(expData) ? expData : []);
-      setIncomes(Array.isArray(incData) ? incData : []);
-      setBorrows(Array.isArray(brData) ? brData : []);
-      setGoals(Array.isArray(goalData) ? goalData : []);
-      setAllocations(Array.isArray(allocData?.allocations) ? allocData.allocations : []);
-      setTotalIncomeBase(allocData?.total_income || 0);
+            if (bundle.summary) {
+              setStartingDebt(bundle.summary.starting_debt || 0);
+              setDeptPayment(bundle.summary.dept_payment || 0);
+              setBorrowAmount(bundle.summary.borrow_amount || 0);
+              setPrevRemaining(bundle.summary.previous_remaining || 0);
+              setRegSavings(bundle.summary.reg_savings || 0);
+              setExtSavings(bundle.summary.ext_savings || 0);
+            }
 
-      // Populate form fields
-      if (sumData) {
-        setStartingDebt(sumData.starting_debt || 0);
-        setDeptPayment(sumData.dept_payment || 0);
-        setBorrowAmount(sumData.borrow_amount || 0);
-        setPrevRemaining(sumData.previous_remaining || 0);
-        setRegSavings(sumData.reg_savings || 0);
-        setExtSavings(sumData.ext_savings || 0);
+            if (Array.isArray(bundle.months) && bundle.months.length > 0) {
+              setAvailableMonths((prev) => {
+                const combined = Array.from(new Set([...prev, ...bundle.months]));
+                return combined.sort().reverse();
+              });
+            }
+
+            bundleLoaded = true;
+          }
+        }
+      } catch (bundleErr) {
+        console.warn('Bundle fetch failed, falling back to parallel endpoints:', bundleErr);
+      }
+
+      // Fallback to individual endpoints if bundle was not loaded
+      if (!bundleLoaded) {
+        const [sumRes, expRes, incRes, brRes, goalRes, allocRes] = await Promise.all([
+          fetch(`/api/budget/summary?month=${m}`),
+          fetch(`/api/budget/expenses?month=${m}`),
+          fetch(`/api/budget/income?month=${m}`),
+          fetch(`/api/budget/borrow?month=${m}`),
+          fetch('/api/budget/goals'),
+          fetch(`/api/budget/allocations?month=${m}`),
+        ]);
+
+        const [sumData, expData, incData, brData, goalData, allocData] = await Promise.all([
+          sumRes.json(),
+          expRes.json(),
+          incRes.json(),
+          brRes.json(),
+          goalRes.json(),
+          allocRes.json(),
+        ]);
+
+        setSummary(sumData);
+        setExpenses(Array.isArray(expData) ? expData : []);
+        setIncomes(Array.isArray(incData) ? incData : []);
+        setBorrows(Array.isArray(brData) ? brData : []);
+        setGoals(Array.isArray(goalData) ? goalData : []);
+        setAllocations(Array.isArray(allocData?.allocations) ? allocData.allocations : (Array.isArray(allocData) ? allocData : []));
+        setTotalIncomeBase(allocData?.total_income || 0);
+
+        // Populate form fields
+        if (sumData) {
+          setStartingDebt(sumData.starting_debt || 0);
+          setDeptPayment(sumData.dept_payment || 0);
+          setBorrowAmount(sumData.borrow_amount || 0);
+          setPrevRemaining(sumData.previous_remaining || 0);
+          setRegSavings(sumData.reg_savings || 0);
+          setExtSavings(sumData.ext_savings || 0);
+        }
       }
     } catch (err) {
       console.error('Failed to load month data:', err);
@@ -582,7 +624,13 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
           <ExpenseLogView
             expenses={expenses}
             currentMonth={selectedMonth}
-            onRefresh={() => loadMonthData(selectedMonth)}
+            onRefresh={(newM) => {
+              if (newM && newM !== selectedMonth && selectedMonth !== 'all') {
+                setSelectedMonth(newM);
+              } else {
+                loadMonthData(selectedMonth);
+              }
+            }}
             quickAddOpen={isQuickAddExpenseOpen}
             onCloseQuickAdd={() => setIsQuickAddExpenseOpen(false)}
           />

@@ -14,15 +14,103 @@ import {
   CreditCard,
   FileText,
   Filter,
+  FileSpreadsheet,
 } from 'lucide-react';
+import { DataImportModal, FieldDefinition } from '../common/DataImportModal';
 
 interface ExpenseLogViewProps {
   expenses: Expense[];
   currentMonth: string;
-  onRefresh: () => void;
+  onRefresh: (newMonth?: string) => void;
   quickAddOpen?: boolean;
   onCloseQuickAdd?: () => void;
 }
+
+const EXPENSE_IMPORT_FIELDS: FieldDefinition[] = [
+  {
+    key: 'date',
+    label: 'Date (YYYY-MM-DD)',
+    required: true,
+    type: 'date',
+    synonyms: ['date', 'txn date', 'transaction date', 'expense date', 'dt', 'day'],
+  },
+  {
+    key: 'description',
+    label: 'Description / Item',
+    required: true,
+    type: 'string',
+    synonyms: ['description', 'particulars', 'narration', 'item', 'title', 'name', 'details'],
+  },
+  {
+    key: 'amount',
+    label: 'Amount (₹)',
+    required: true,
+    type: 'number',
+    synonyms: ['amount', 'amt', 'cost', 'paid', 'debit', 'total', 'price', 'value'],
+  },
+  {
+    key: 'category',
+    label: 'Category (reg / ext)',
+    required: false,
+    type: 'string',
+    synonyms: ['category', 'cat', 'type', 'group'],
+    defaultValue: 'ext',
+  },
+  {
+    key: 'tag',
+    label: 'Tag / Subcategory',
+    required: false,
+    type: 'string',
+    synonyms: ['tag', 'tags', 'head', 'label', 'department'],
+    defaultValue: 'General',
+  },
+  {
+    key: 'payment_method',
+    label: 'Payment Method',
+    required: false,
+    type: 'string',
+    synonyms: ['payment_method', 'payment method', 'mode', 'payment mode', 'paid via', 'account'],
+    defaultValue: 'UPI / Bank',
+  },
+  {
+    key: 'notes',
+    label: 'Notes',
+    required: false,
+    type: 'string',
+    synonyms: ['notes', 'note', 'memo', 'comment', 'remarks'],
+    defaultValue: '',
+  },
+];
+
+const EXPENSE_SAMPLE_TEMPLATE = [
+  {
+    'Date': '2026-10-15',
+    'Category': 'reg',
+    'Tag': 'Utilities',
+    'Description': 'Office High-Speed Internet Bill',
+    'Amount': 1199,
+    'Payment Method': 'UPI / Bank',
+    'Notes': 'Monthly broadband fiber',
+  },
+  {
+    'Date': '2026-10-16',
+    'Category': 'ext',
+    'Tag': 'Food',
+    'Description': 'Team meeting dinner',
+    'Amount': 1450,
+    'Payment Method': 'UPI / Bank',
+    'Notes': 'Client quarterly discussion',
+  },
+  {
+    'Date': '2026-10-17',
+    'Category': 'reg',
+    'Tag': 'Fuel',
+    'Description': 'Vehicle Petrol refill',
+    'Amount': 500,
+    'Payment Method': 'UPI / Bank',
+    'Notes': 'Site visit',
+  },
+];
 
 const COMMON_TAGS = [
   'Food',
@@ -53,6 +141,7 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(quickAddOpen);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
 
   // Form State
@@ -110,15 +199,16 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!description.trim() || !amount || Number(amount) <= 0) {
-      alert('Please enter a valid description and amount.');
+      alert('Please enter a valid description and positive amount.');
       return;
     }
 
     try {
       setSaving(true);
+      const entryMonth = date ? date.substring(0, 7) : new Date().toISOString().substring(0, 7);
       const payload = {
         date,
-        month: date.substring(0, 7),
+        month: entryMonth,
         category,
         tag: tag.trim() || undefined,
         description: description.trim(),
@@ -128,24 +218,32 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
       };
 
       if (editingExpense) {
-        await fetch(`/api/budget/expenses/${editingExpense.id}`, {
+        const res = await fetch(`/api/budget/expenses/${editingExpense.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `Failed to update expense (${res.status})`);
+        }
       } else {
-        await fetch('/api/budget/expenses', {
+        const res = await fetch('/api/budget/expenses', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `Failed to create expense (${res.status})`);
+        }
       }
 
       handleCloseModal();
-      onRefresh();
-    } catch (err) {
+      onRefresh(entryMonth);
+    } catch (err: any) {
       console.error('Failed to save expense:', err);
-      alert('Failed to save expense. Please try again.');
+      alert(err.message || 'Failed to save expense. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -154,10 +252,15 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this expense entry?')) return;
     try {
-      await fetch(`/api/budget/expenses/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/budget/expenses/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Failed to delete expense (${res.status})`);
+      }
       onRefresh();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to delete expense:', err);
+      alert(err.message || 'Failed to delete expense.');
     }
   };
 
@@ -217,13 +320,21 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center">
+        <div className="flex flex-col gap-2 justify-center">
           <Button
             onClick={handleOpenNew}
-            className="w-full h-full min-h-[58px] bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white font-medium shadow-xs flex items-center justify-center gap-2 rounded-xl text-xs cursor-pointer transition-colors"
+            className="w-full py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white font-medium shadow-xs flex items-center justify-center gap-2 rounded-xl text-xs cursor-pointer transition-colors"
           >
             <Plus className="w-4 h-4" />
             Add Expense Entry
+          </Button>
+          <Button
+            onClick={() => setIsImportModalOpen(true)}
+            variant="outline"
+            className="w-full py-2 border-emerald-300 dark:border-emerald-800/80 bg-emerald-50/60 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/60 font-medium shadow-2xs flex items-center justify-center gap-2 rounded-xl text-xs cursor-pointer transition-colors"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            Import Excel / CSV
           </Button>
         </div>
       </div>
@@ -554,6 +665,22 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Excel / CSV Import Modal */}
+      <DataImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        title="Import Expenses from Excel / CSV"
+        description="Bulk import daily or monthly expense records from spreadsheets"
+        entityName="Expenses"
+        targetFields={EXPENSE_IMPORT_FIELDS}
+        sampleData={EXPENSE_SAMPLE_TEMPLATE}
+        apiEndpoint="/api/budget/expenses/batch"
+        onSuccess={(count) => {
+          alert(`Successfully imported ${count} expenses!`);
+          onRefresh();
+        }}
+      />
     </div>
   );
 };

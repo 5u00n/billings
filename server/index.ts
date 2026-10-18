@@ -1664,7 +1664,21 @@ function calculateBudgetSummary(month: string) {
   const previousRemaining = summary.previous_remaining || 0;
   const totalIncomeEarned = salary + freelance + returns + extIncome;
   const totalInflow = previousRemaining + totalIncomeEarned;
-  const debtPayment = summary.dept_payment || 0;
+
+  // Auto-calculate debt payments from expenses if not manually specified in summary
+  let autoDebtPaid = 0;
+  try {
+    const expDebtRow: any = db
+      .prepare(`
+        SELECT SUM(amount) as total FROM expenses
+        WHERE month = ? AND (tag = 'Debt Repayment' OR tag LIKE '%Payback%' OR linked_borrow_id IS NOT NULL)
+      `)
+      .get(month);
+    if (expDebtRow && expDebtRow.total) {
+      autoDebtPaid = expDebtRow.total;
+    }
+  } catch (e) {}
+  const debtPayment = summary.dept_payment || autoDebtPaid;
 
   // Excel formula: Overhead = (Total Inflow + Borrow) - (Total Outflow + Debt Paid)
   const overhead = (totalInflow + finalBorrow) - (totalExpense + debtPayment);
@@ -2132,8 +2146,8 @@ app.post('/api/budget/expenses', (req: Request, res: Response) => {
     const busPct = body.business_percentage !== undefined ? Number(body.business_percentage) : (taxClass === 'MIXED_APPORTIONED' ? 70 : 100);
 
     db.prepare(`
-      INSERT INTO expenses (id, date, month, category, tag, description, amount, payment_method, notes, tax_classification, business_percentage, gst_rate, gst_itc_eligible, has_invoice_voucher, voucher_ref)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO expenses (id, date, month, category, tag, description, amount, payment_method, notes, tax_classification, business_percentage, gst_rate, gst_itc_eligible, has_invoice_voucher, voucher_ref, linked_borrow_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       date,
@@ -2149,8 +2163,58 @@ app.post('/api/budget/expenses', (req: Request, res: Response) => {
       Number(body.gst_rate) || 0,
       body.gst_itc_eligible ? 1 : 0,
       body.has_invoice_voucher !== undefined ? (body.has_invoice_voucher ? 1 : 0) : 1,
-      body.voucher_ref || ''
+      body.voucher_ref || '',
+      body.linked_borrow_id || null
     );
+
+    // If payment method is Credit Card and create_borrow is not explicitly false, auto-create a borrow record
+    if (body.payment_method === 'Credit Card' && body.create_borrow !== false) {
+      const borrowId = `borrow-cc-${id}`;
+      const personName = (body.borrow_entity && String(body.borrow_entity).trim()) || 'Credit Card';
+      try {
+        db.prepare(`
+          INSERT OR REPLACE INTO borrow_records (id, date, month, type, person, reason, amount, status)
+          VALUES (?, ?, ?, 'BORROW', ?, ?, ?, 'PENDING')
+        `).run(
+          borrowId,
+          date,
+          month,
+          personName,
+          `Credit Card: ${body.description.trim()}`,
+          amount
+        );
+      } catch (bErr) {
+        console.error('Failed to auto-create credit card borrow record:', bErr);
+      }
+    }
+
+    // If this expense is a payback for an existing borrow record, settle it
+    if (body.linked_borrow_id && body.settle_borrow !== false) {
+      try {
+        db.prepare("UPDATE borrow_records SET status = 'SETTLED' WHERE id = ?").run(body.linked_borrow_id);
+      } catch (bErr) {
+        console.error('Failed to settle linked borrow record:', bErr);
+      }
+    } else if (body.is_new_borrow_payback && body.payback_person) {
+      // User logged a new borrow payback directly from expense page
+      try {
+        const newBorrowId = `borrow-pb-${id}`;
+        db.prepare(`
+          INSERT OR REPLACE INTO borrow_records (id, date, month, type, person, reason, amount, status)
+          VALUES (?, ?, ?, 'BORROW', ?, ?, ?, 'SETTLED')
+        `).run(
+          newBorrowId,
+          date,
+          month,
+          String(body.payback_person).trim(),
+          `Payback: ${body.description.trim()}`,
+          amount
+        );
+      } catch (bErr) {
+        console.error('Failed to log new settled borrow record:', bErr);
+      }
+    }
+
     res.json({ success: true, id, month });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -2166,8 +2230,8 @@ app.post('/api/budget/expenses/batch', (req: Request, res: Response) => {
 
   try {
     const insertStmt = db.prepare(`
-      INSERT INTO expenses (id, date, month, category, tag, description, amount, payment_method, notes, tax_classification, business_percentage, gst_rate, gst_itc_eligible, has_invoice_voucher, voucher_ref)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO expenses (id, date, month, category, tag, description, amount, payment_method, notes, tax_classification, business_percentage, gst_rate, gst_itc_eligible, has_invoice_voucher, voucher_ref, linked_borrow_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     let importedCount = 0;
@@ -2207,8 +2271,25 @@ app.post('/api/budget/expenses/batch', (req: Request, res: Response) => {
           Number(b.gst_rate) || 0,
           b.gst_itc_eligible ? 1 : 0,
           b.has_invoice_voucher !== undefined ? (b.has_invoice_voucher ? 1 : 0) : 1,
-          b.voucher_ref || ''
+          b.voucher_ref || '',
+          b.linked_borrow_id || null
         );
+
+        if (b.payment_method === 'Credit Card') {
+          try {
+            db.prepare(`
+              INSERT OR REPLACE INTO borrow_records (id, date, month, type, person, reason, amount, status)
+              VALUES (?, ?, ?, 'BORROW', ?, ?, ?, 'PENDING')
+            `).run(
+              `borrow-cc-${id}`,
+              date,
+              month,
+              'Credit Card',
+              `Credit Card: ${String(b.description).trim()}`,
+              amount
+            );
+          } catch (e) {}
+        }
         importedCount++;
       }
     });
@@ -2241,7 +2322,8 @@ app.put('/api/budget/expenses/:id', (req: Request, res: Response) => {
         gst_rate = COALESCE(?, gst_rate),
         gst_itc_eligible = COALESCE(?, gst_itc_eligible),
         has_invoice_voucher = COALESCE(?, has_invoice_voucher),
-        voucher_ref = COALESCE(?, voucher_ref)
+        voucher_ref = COALESCE(?, voucher_ref),
+        linked_borrow_id = COALESCE(?, linked_borrow_id)
       WHERE id = ?
     `).run(
       date,
@@ -2258,8 +2340,21 @@ app.put('/api/budget/expenses/:id', (req: Request, res: Response) => {
       body.gst_itc_eligible !== undefined ? (body.gst_itc_eligible ? 1 : 0) : null,
       body.has_invoice_voucher !== undefined ? (body.has_invoice_voucher ? 1 : 0) : null,
       body.voucher_ref !== undefined ? body.voucher_ref : null,
+      body.linked_borrow_id !== undefined ? body.linked_borrow_id : null,
       req.params.id
     );
+
+    // Sync credit card borrow if exists
+    try {
+      const ccBorrow: any = db.prepare('SELECT id FROM borrow_records WHERE id = ?').get(`borrow-cc-${req.params.id}`);
+      if (ccBorrow) {
+        db.prepare(`
+          UPDATE borrow_records SET date = ?, month = ?, amount = ?, reason = ?
+          WHERE id = ?
+        `).run(date, month, Number(body.amount) || 0, `Credit Card: ${String(body.description).trim()}`, ccBorrow.id);
+      }
+    } catch (e) {}
+
     res.json({ success: true });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -2268,6 +2363,11 @@ app.put('/api/budget/expenses/:id', (req: Request, res: Response) => {
 
 app.delete('/api/budget/expenses/:id', (req: Request, res: Response) => {
   try {
+    // Delete linked pending credit card borrow if exists
+    try {
+      db.prepare("DELETE FROM borrow_records WHERE id = ? AND status = 'PENDING'").run(`borrow-cc-${req.params.id}`);
+    } catch (e) {}
+
     db.prepare('DELETE FROM expenses WHERE id = ?').run(req.params.id);
     res.json({ success: true });
   } catch (err: any) {

@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS expenses (
   gst_itc_eligible INTEGER DEFAULT 0,
   has_invoice_voucher INTEGER DEFAULT 1,
   voucher_ref TEXT,
+  linked_borrow_id TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

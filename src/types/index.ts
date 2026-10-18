@@ -170,6 +170,7 @@ export interface Expense {
   gst_itc_eligible?: boolean;
   has_invoice_voucher?: boolean;
   voucher_ref?: string;
+  linked_borrow_id?: string;
   created_at?: string;
 }
 

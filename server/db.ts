@@ -218,6 +218,9 @@ try {
 try {
   db.exec('ALTER TABLE expenses ADD COLUMN voucher_ref TEXT');
 } catch (e) {}
+try {
+  db.exec('ALTER TABLE expenses ADD COLUMN linked_borrow_id TEXT');
+} catch (e) {}
 
 // Seed statutory Indian tax compliance reminders if empty
 const reminderCount = db.prepare('SELECT COUNT(*) as count FROM tax_reminders').get() as { count: number };

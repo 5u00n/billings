@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Expense } from '../../types';
 import { ExpenseLogView } from './ExpenseLogView';
-import { Receipt, Calendar, ChevronDown, Plus } from 'lucide-react';
+import { Receipt, Calendar, ChevronDown, Plus, HandCoins } from 'lucide-react';
 import { Button } from '../ui/button';
 
 export const ExpensePage: React.FC = () => {
@@ -10,6 +10,7 @@ export const ExpensePage: React.FC = () => {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+  const [isQuickPaybackOpen, setIsQuickPaybackOpen] = useState(false);
 
   useEffect(() => {
     fetchMonths();
@@ -90,12 +91,12 @@ export const ExpensePage: React.FC = () => {
               Expense Ledger
             </h1>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Track daily expenses with Regular (fixed) vs Extra (discretionary) tags from your spreadsheet.
+              Track daily expenses with Regular (fixed) vs Extra (discretionary) tags, credit card liabilities & debt paybacks.
             </p>
           </div>
         </div>
 
-        {/* Month Selector & Add Entry */}
+        {/* Month Selector & Actions */}
         <div className="flex items-center gap-2.5">
           <div className="relative">
             <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -115,9 +116,19 @@ export const ExpensePage: React.FC = () => {
           </div>
 
           <Button
+            onClick={() => setIsQuickPaybackOpen(true)}
+            size="sm"
+            variant="outline"
+            className="gap-1.5 border-teal-300 dark:border-teal-800/80 bg-teal-50/70 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 hover:bg-teal-100 dark:hover:bg-teal-900/40 font-semibold text-xs h-9 rounded-xl shadow-2xs cursor-pointer"
+          >
+            <HandCoins className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+            <span className="hidden sm:inline">Payback /</span> Repay Debt
+          </Button>
+
+          <Button
             onClick={() => setIsQuickAddOpen(true)}
             size="sm"
-            className="gap-1.5 bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs h-9 rounded-xl shadow-xs"
+            className="gap-1.5 bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs h-9 rounded-xl shadow-xs cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Add Expense</span>
@@ -132,6 +143,8 @@ export const ExpensePage: React.FC = () => {
         onRefresh={handleRefresh}
         quickAddOpen={isQuickAddOpen}
         onCloseQuickAdd={() => setIsQuickAddOpen(false)}
+        quickPaybackOpen={isQuickPaybackOpen}
+        onCloseQuickPayback={() => setIsQuickPaybackOpen(false)}
       />
     </div>
   );

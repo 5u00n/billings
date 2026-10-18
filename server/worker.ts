@@ -779,7 +779,15 @@ export default {
           const rawSummary = summaryRow as any;
           const startingDebt = Number(rawSummary?.starting_debt) || 0;
           const previousRemaining = Number(rawSummary?.previous_remaining) || 0;
-          const debtPayment = Number(rawSummary?.dept_payment) || 0;
+          let debtPayment = Number(rawSummary?.dept_payment) || 0;
+          if (!debtPayment) {
+            try {
+              const expDebtRow: any = await db.prepare("SELECT SUM(amount) as total FROM expenses WHERE month = ? AND (tag = 'Debt Repayment' OR tag LIKE '%Payback%' OR linked_borrow_id IS NOT NULL)").bind(m).first();
+              if (expDebtRow && expDebtRow.total) {
+                debtPayment = Number(expDebtRow.total) || 0;
+              }
+            } catch (e) {}
+          }
           const finalBorrow = rawSummary?.borrow_amount !== undefined && rawSummary?.borrow_amount !== null ? Number(rawSummary.borrow_amount) : autoBorrow;
           const regSavings = Number(rawSummary?.reg_savings) || 0;
           const extSavings = Number(rawSummary?.ext_savings) || 0;
@@ -874,8 +882,8 @@ export default {
             const amount = Number(b.amount) || 0;
 
             await db.prepare(`
-              INSERT INTO expenses (id, date, month, category, tag, description, amount, payment_method, notes, tax_classification, business_percentage, gst_rate, gst_itc_eligible, has_invoice_voucher, voucher_ref)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              INSERT INTO expenses (id, date, month, category, tag, description, amount, payment_method, notes, tax_classification, business_percentage, gst_rate, gst_itc_eligible, has_invoice_voucher, voucher_ref, linked_borrow_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).bind(
               id,
               date,
@@ -891,8 +899,51 @@ export default {
               b.gst_rate ?? 0,
               b.gst_itc_eligible ? 1 : 0,
               b.has_invoice_voucher ? 1 : 0,
-              b.voucher_ref || ''
+              b.voucher_ref || '',
+              b.linked_borrow_id || null
             ).run();
+
+            // Auto-create borrow record if Credit Card
+            if (b.payment_method === 'Credit Card' && b.create_borrow !== false) {
+              try {
+                const borrowId = `borrow-cc-${id}`;
+                const personName = (b.borrow_entity && String(b.borrow_entity).trim()) || 'Credit Card';
+                await db.prepare(`
+                  INSERT OR REPLACE INTO borrow_records (id, date, month, type, person, reason, amount, status)
+                  VALUES (?, ?, ?, 'BORROW', ?, ?, ?, 'PENDING')
+                `).bind(
+                  borrowId,
+                  date,
+                  month,
+                  personName,
+                  `Credit Card: ${String(b.description || '').trim()}`,
+                  amount
+                ).run();
+              } catch (e) {}
+            }
+
+            // Settle existing borrow if linked
+            if (b.linked_borrow_id && b.settle_borrow !== false) {
+              try {
+                await db.prepare("UPDATE borrow_records SET status = 'SETTLED' WHERE id = ?").bind(b.linked_borrow_id).run();
+              } catch (e) {}
+            } else if (b.is_new_borrow_payback && b.payback_person) {
+              try {
+                const newBorrowId = `borrow-pb-${id}`;
+                await db.prepare(`
+                  INSERT OR REPLACE INTO borrow_records (id, date, month, type, person, reason, amount, status)
+                  VALUES (?, ?, ?, 'BORROW', ?, ?, ?, 'SETTLED')
+                `).bind(
+                  newBorrowId,
+                  date,
+                  month,
+                  String(b.payback_person).trim(),
+                  `Payback: ${String(b.description || '').trim()}`,
+                  amount
+                ).run();
+              } catch (e) {}
+            }
+
             return jsonResponse({ id, month, success: true }, 201);
           }
         }
@@ -911,8 +962,8 @@ export default {
             const id = b.id || crypto.randomUUID();
 
             await db.prepare(`
-              INSERT INTO expenses (id, date, month, category, tag, description, amount, payment_method, notes, tax_classification, business_percentage, gst_rate, gst_itc_eligible, has_invoice_voucher, voucher_ref)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              INSERT INTO expenses (id, date, month, category, tag, description, amount, payment_method, notes, tax_classification, business_percentage, gst_rate, gst_itc_eligible, has_invoice_voucher, voucher_ref, linked_borrow_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).bind(
               id,
               date,
@@ -928,8 +979,25 @@ export default {
               b.gst_rate ?? 0,
               b.gst_itc_eligible ? 1 : 0,
               b.has_invoice_voucher !== undefined ? (b.has_invoice_voucher ? 1 : 0) : 1,
-              b.voucher_ref || ''
+              b.voucher_ref || '',
+              b.linked_borrow_id || null
             ).run();
+
+            if (b.payment_method === 'Credit Card') {
+              try {
+                await db.prepare(`
+                  INSERT OR REPLACE INTO borrow_records (id, date, month, type, person, reason, amount, status)
+                  VALUES (?, ?, ?, 'BORROW', ?, ?, ?, 'PENDING')
+                `).bind(
+                  `borrow-cc-${id}`,
+                  date,
+                  month,
+                  'Credit Card',
+                  `Credit Card: ${String(b.description).trim()}`,
+                  amount
+                ).run();
+              } catch (e) {}
+            }
             count++;
           }
           return jsonResponse({ success: true, count });
@@ -947,7 +1015,8 @@ export default {
               UPDATE expenses SET
                 date = ?, month = ?, category = ?, tag = ?, description = ?, amount = ?,
                 payment_method = ?, notes = ?, tax_classification = ?, business_percentage = ?,
-                gst_rate = ?, gst_itc_eligible = ?, has_invoice_voucher = ?, voucher_ref = ?
+                gst_rate = ?, gst_itc_eligible = ?, has_invoice_voucher = ?, voucher_ref = ?,
+                linked_borrow_id = COALESCE(?, linked_borrow_id)
               WHERE id = ?
             `).bind(
               date,
@@ -964,11 +1033,27 @@ export default {
               b.gst_itc_eligible ? 1 : 0,
               b.has_invoice_voucher ? 1 : 0,
               b.voucher_ref || '',
+              b.linked_borrow_id || null,
               id
             ).run();
+
+            try {
+              const ccBorrow: any = await db.prepare('SELECT id FROM borrow_records WHERE id = ?').bind(`borrow-cc-${id}`).first();
+              if (ccBorrow) {
+                await db.prepare(`
+                  UPDATE borrow_records SET date = ?, month = ?, amount = ?, reason = ?
+                  WHERE id = ?
+                `).bind(date, month, Number(b.amount) || 0, `Credit Card: ${String(b.description).trim()}`, ccBorrow.id).run();
+              }
+            } catch (e) {}
+
             return jsonResponse({ success: true });
           }
           if (method === 'DELETE') {
+            try {
+              await db.prepare("DELETE FROM borrow_records WHERE id = ? AND status = 'PENDING'").bind(`borrow-cc-${id}`).run();
+            } catch (e) {}
+
             await db.prepare('DELETE FROM expenses WHERE id = ?').bind(id).run();
             return jsonResponse({ success: true });
           }

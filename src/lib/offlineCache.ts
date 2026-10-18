@@ -112,6 +112,7 @@ export const offlineCache = {
   invalidateOnMutation(mutationUrl: string): void {
     if (mutationUrl.includes('/api/budget/expenses')) {
       offlineCache.invalidate('/api/budget/expenses');
+      offlineCache.invalidate('/api/budget/borrow');
       offlineCache.invalidate('/api/budget/months');
       offlineCache.invalidate('/api/budget/summary');
       offlineCache.invalidate('/api/budget/month-bundle');
@@ -127,6 +128,7 @@ export const offlineCache = {
       offlineCache.invalidate('/api/budget/current-account');
     } else if (mutationUrl.includes('/api/budget/borrow')) {
       offlineCache.invalidate('/api/budget/borrow');
+      offlineCache.invalidate('/api/budget/expenses');
       offlineCache.invalidate('/api/budget/months');
       offlineCache.invalidate('/api/budget/summary');
       offlineCache.invalidate('/api/budget/month-bundle');

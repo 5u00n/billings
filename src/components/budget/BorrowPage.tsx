@@ -19,22 +19,28 @@ export const BorrowPage: React.FC = () => {
     }
   }, [selectedMonth]);
 
-  const fetchMonths = async () => {
+  const fetchMonths = async (): Promise<string[]> => {
     try {
       const res = await fetch('/api/budget/months');
+      if (!res.ok) return [];
       const data = await res.json();
       if (Array.isArray(data) && data.length > 0) {
         setAvailableMonths(data);
-        if (!data.includes(selectedMonth)) {
+        if (!data.includes(selectedMonth) && selectedMonth !== 'all') {
           setSelectedMonth(data[0]);
         }
+        return data;
       } else {
         const currentM = new Date().toISOString().substring(0, 7);
         setAvailableMonths([currentM]);
-        setSelectedMonth(currentM);
+        if (selectedMonth !== 'all') {
+          setSelectedMonth(currentM);
+        }
+        return [currentM];
       }
     } catch (err) {
       console.error('Failed to fetch months:', err);
+      return [];
     }
   };
 
@@ -42,12 +48,26 @@ export const BorrowPage: React.FC = () => {
     try {
       setLoading(true);
       const res = await fetch(`/api/budget/borrow?month=${m}`);
+      if (!res.ok) {
+        setRecords([]);
+        return;
+      }
       const data = await res.json();
-      setRecords(data || []);
+      setRecords(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to load borrow records:', err);
+      setRecords([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRefresh = async (entryMonth?: string) => {
+    await fetchMonths();
+    if (entryMonth && entryMonth !== selectedMonth && selectedMonth !== 'all') {
+      setSelectedMonth(entryMonth);
+    } else {
+      await loadBorrows(selectedMonth);
     }
   };
 
@@ -103,7 +123,7 @@ export const BorrowPage: React.FC = () => {
       {/* Borrow Returns View */}
       <BorrowReturnsView
         records={records}
-        onRefresh={() => loadBorrows(selectedMonth)}
+        onRefresh={handleRefresh}
       />
     </div>
   );

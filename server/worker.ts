@@ -515,21 +515,187 @@ export default {
         }
 
         // --- BUDGET: MONTHS ---
-        if (url.pathname === '/api/budget/months' && method === 'GET') {
-          const q = `
-            SELECT DISTINCT month FROM expenses
-            UNION
-            SELECT DISTINCT month FROM income_entries
-            UNION
-            SELECT DISTINCT month FROM borrow_records
-            UNION
-            SELECT month FROM monthly_budget_summaries
-            ORDER BY month DESC
-          `;
-          const { results } = await db.prepare(q).all();
-          const currentMonth = new Date().toISOString().substring(0, 7);
-          const months = Array.from(new Set([...results.map((r: any) => r.month).filter(Boolean), currentMonth])).sort().reverse();
-          return jsonResponse(months);
+        if (url.pathname === '/api/budget/months') {
+          if (method === 'GET') {
+            const q = `
+              SELECT DISTINCT month FROM expenses
+              UNION
+              SELECT DISTINCT month FROM income_entries
+              UNION
+              SELECT DISTINCT month FROM borrow_records
+              UNION
+              SELECT month FROM monthly_budget_summaries
+              ORDER BY month DESC
+            `;
+            const { results } = await db.prepare(q).all();
+            const currentMonth = new Date().toISOString().substring(0, 7);
+            const months = Array.from(new Set([...results.map((r: any) => r.month).filter(Boolean), currentMonth])).sort().reverse();
+            return jsonResponse(months);
+          }
+          if (method === 'POST') {
+            try {
+              const { month } = (await request.json()) as any;
+              if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+                return errorResponse('Valid YYYY-MM month string is required', 400);
+              }
+              const existing = await db.prepare('SELECT month FROM monthly_budget_summaries WHERE month = ?').bind(month).first();
+              if (!existing) {
+                await db.prepare(`
+                  INSERT INTO monthly_budget_summaries (month, starting_debt, previous_remaining, dept_payment, borrow_amount, reg_savings, ext_savings, notes)
+                  VALUES (?, 0, 0, 0, 0, 0, 0, '')
+                `).bind(month).run();
+              }
+              return jsonResponse({ success: true, month }, 201);
+            } catch (err: any) {
+              return errorResponse(err.message || 'Failed to add month', 500);
+            }
+          }
+        }
+
+        // --- BUDGET: MULTI-MONTH BREAKDOWN (Monthly Breakdown Ledger) ---
+        if (url.pathname === '/api/budget/monthly-breakdown' && method === 'GET') {
+          try {
+            // 1. Gather all unique months across all budget tables
+            const qMonths = `
+              SELECT DISTINCT month FROM expenses
+              UNION
+              SELECT DISTINCT month FROM income_entries
+              UNION
+              SELECT DISTINCT month FROM borrow_records
+              UNION
+              SELECT month FROM monthly_budget_summaries
+              ORDER BY month ASC
+            `;
+            const { results: mResults } = await db.prepare(qMonths).all();
+            const monthSet = new Set<string>();
+            (mResults || []).forEach((r: any) => {
+              if (r && r.month && r.month.length === 7) monthSet.add(r.month);
+            });
+
+            // Ensure baseline months (2026-08, 2026-09, 2026-10) exist
+            ['2026-08', '2026-09', '2026-10'].forEach((m) => monthSet.add(m));
+            const sortedMonths = Array.from(monthSet).sort();
+
+            // 2. Fetch all data in batch to avoid N+1 queries
+            const [allSummariesRes, allExpensesRes, allIncomesRes, allBorrowsRes] = await Promise.all([
+              db.prepare('SELECT * FROM monthly_budget_summaries').all(),
+              db.prepare('SELECT month, category, SUM(amount) as total FROM expenses GROUP BY month, category').all(),
+              db.prepare('SELECT month, category, SUM(amount) as total FROM income_entries GROUP BY month, category').all(),
+              db.prepare('SELECT month, type, SUM(amount) as total FROM borrow_records GROUP BY month, type').all(),
+            ]);
+
+            const summariesByMonth = new Map<string, any>();
+            (allSummariesRes.results || []).forEach((s: any) => summariesByMonth.set(s.month, s));
+
+            const expensesByMonth = new Map<string, { reg: number; ext: number; total: number }>();
+            (allExpensesRes.results || []).forEach((e: any) => {
+              const cur = expensesByMonth.get(e.month) || { reg: 0, ext: 0, total: 0 };
+              const amt = Number(e.total) || 0;
+              if (e.category === 'reg') cur.reg += amt;
+              else cur.ext += amt;
+              cur.total += amt;
+              expensesByMonth.set(e.month, cur);
+            });
+
+            const incomesByMonth = new Map<string, { sal: number; fl: number; rt: number; ext: number }>();
+            (allIncomesRes.results || []).forEach((i: any) => {
+              const cur = incomesByMonth.get(i.month) || { sal: 0, fl: 0, rt: 0, ext: 0 };
+              const amt = Number(i.total) || 0;
+              if (i.category === 'sal') cur.sal += amt;
+              else if (i.category === 'fl') cur.fl += amt;
+              else if (i.category === 'rt') cur.rt += amt;
+              else cur.ext += amt;
+              incomesByMonth.set(i.month, cur);
+            });
+
+            const borrowsByMonth = new Map<string, { borrow: number; return: number }>();
+            (allBorrowsRes.results || []).forEach((b: any) => {
+              const cur = borrowsByMonth.get(b.month) || { borrow: 0, return: 0 };
+              const amt = Number(b.total) || 0;
+              if (b.type === 'BORROW') cur.borrow += amt;
+              else if (b.type === 'RETURN') cur.return += amt;
+              borrowsByMonth.set(b.month, cur);
+            });
+
+            // 3. Sequential carryover calculation
+            const breakdown: any[] = [];
+            let carryEndingDebt = 62152;
+            let carryRemaining = 14000;
+
+            sortedMonths.forEach((m, idx) => {
+              const summary = summariesByMonth.get(m) || {};
+
+              const startingDebt = summary.starting_debt !== undefined && summary.starting_debt !== null && Number(summary.starting_debt) !== 0
+                ? Number(summary.starting_debt)
+                : (idx === 0 ? 62152 : carryEndingDebt);
+
+              const previousRemaining = summary.previous_remaining !== undefined && summary.previous_remaining !== null
+                ? Number(summary.previous_remaining)
+                : (idx === 0 ? 14000 : carryRemaining);
+
+              const exp = expensesByMonth.get(m) || { reg: 0, ext: 0, total: 0 };
+              const inc = incomesByMonth.get(m) || { sal: 0, fl: 0, rt: 0, ext: 0 };
+              const br = borrowsByMonth.get(m) || { borrow: 0, return: 0 };
+
+              const salary = inc.sal;
+              const freelance = inc.fl;
+              const returns = Math.max(inc.rt, br.return);
+              const extIncome = inc.ext;
+
+              const regExpense = exp.reg;
+              const extExpense = exp.ext;
+              const totalExpense = exp.total;
+
+              const autoBorrow = br.borrow;
+              const finalBorrow = summary.borrow_amount !== undefined && summary.borrow_amount !== null
+                ? Number(summary.borrow_amount)
+                : autoBorrow;
+
+              const totalIncome = previousRemaining + salary + freelance + returns + extIncome;
+              const regSavings = Number(summary.reg_savings) || 0;
+              const extSavings = Number(summary.ext_savings) || 0;
+              const deptPayment = Number(summary.dept_payment) || 0;
+
+              const overhead = (totalIncome + finalBorrow) - (totalExpense + deptPayment);
+              const ovhSavings = overhead > 0 ? Math.round(overhead / 2) : 0;
+              const totalSavings = regSavings + extSavings + ovhSavings;
+              const remaining = overhead > 0 ? (overhead - ovhSavings) : 0;
+
+              const deficit = totalExpense > totalIncome ? totalExpense - totalIncome : 0;
+              const endingDebt = (startingDebt - deptPayment) + finalBorrow + deficit;
+
+              carryEndingDebt = endingDebt;
+              carryRemaining = remaining;
+
+              breakdown.push({
+                month: m,
+                starting_debt: startingDebt,
+                previous_remaining: previousRemaining,
+                salary,
+                freelance,
+                returns,
+                ext_income: extIncome,
+                total_income: totalIncome,
+                reg_savings: regSavings,
+                ext_savings: extSavings,
+                total_savings: totalSavings,
+                reg_expense: regExpense,
+                ext_expense: extExpense,
+                total_expense: totalExpense,
+                dept_payment: deptPayment,
+                borrow_amount: finalBorrow,
+                overhead,
+                ovh_savings: ovhSavings,
+                remaining,
+                ending_debt: endingDebt,
+                notes: summary.notes || '',
+              });
+            });
+
+            return jsonResponse(breakdown);
+          } catch (err: any) {
+            return errorResponse(err.message || 'Failed to calculate monthly breakdown', 500);
+          }
         }
 
         // --- BUDGET: CONSOLIDATED MONTH BUNDLE (Single Roundtrip) ---
@@ -889,59 +1055,98 @@ export default {
             return jsonResponse(results || []);
           }
           if (method === 'POST') {
-            const b = (await request.json()) as any;
-            const id = b.id || crypto.randomUUID();
-            const date = (b.date && typeof b.date === 'string' && b.date.trim())
-              ? b.date.trim()
-              : new Date().toISOString().split('T')[0];
-            const month = b.month || date.substring(0, 7);
-            await db.prepare(`
-              INSERT INTO borrow_records (id, date, month, type, person, reason, amount, status)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `).bind(id, date, month, b.type || 'BORROW', b.person || 'Person', b.reason || '', b.amount || 0, b.status || 'PENDING').run();
-            return jsonResponse({ id, month, success: true }, 201);
+            try {
+              const b = (await request.json()) as any;
+              const amount = Number(b.amount);
+              const person = b.person ? String(b.person).trim() : '';
+              if (!person || isNaN(amount) || amount <= 0) {
+                return errorResponse('Person and a valid amount greater than 0 are required', 400);
+              }
+              const id = b.id || crypto.randomUUID();
+              const date = (b.date && typeof b.date === 'string' && b.date.trim())
+                ? b.date.trim().substring(0, 10)
+                : new Date().toISOString().split('T')[0];
+              const month = b.month || date.substring(0, 7);
+              const type = b.type || 'BORROW';
+              const reason = b.reason ? String(b.reason).trim() : '';
+              const status = b.status || 'PENDING';
+
+              await db.prepare(`
+                INSERT INTO borrow_records (id, date, month, type, person, reason, amount, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              `).bind(id, date, month, type, person, reason, amount, status).run();
+              return jsonResponse({ id, month, success: true }, 201);
+            } catch (err: any) {
+              return errorResponse(err.message || 'Failed to save borrow record', 500);
+            }
           }
         }
 
         if (url.pathname === '/api/budget/borrow/batch' && method === 'POST') {
-          const { items } = (await request.json()) as any;
-          if (!Array.isArray(items)) return errorResponse('Items array required', 400);
-          let count = 0;
-          for (const b of items) {
-            const amount = Number(b.amount) || 0;
-            if (amount <= 0 || !b.person) continue;
-            const date = (b.date && typeof b.date === 'string' && b.date.trim())
-              ? b.date.trim().substring(0, 10)
-              : new Date().toISOString().split('T')[0];
-            const month = b.month || date.substring(0, 7);
-            const id = b.id || crypto.randomUUID();
+          try {
+            const { items } = (await request.json()) as any;
+            if (!Array.isArray(items)) return errorResponse('Items array required', 400);
+            let count = 0;
+            for (const b of items) {
+              const amount = Number(b.amount) || 0;
+              const person = b.person ? String(b.person).trim() : '';
+              if (amount <= 0 || !person) continue;
+              const date = (b.date && typeof b.date === 'string' && b.date.trim())
+                ? b.date.trim().substring(0, 10)
+                : new Date().toISOString().split('T')[0];
+              const month = b.month || date.substring(0, 7);
+              const id = b.id || crypto.randomUUID();
+              const type = b.type || 'BORROW';
+              const reason = b.reason ? String(b.reason).trim() : '';
+              const status = b.status || 'PENDING';
 
-            await db.prepare(`
-              INSERT INTO borrow_records (id, date, month, type, person, reason, amount, status)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `).bind(id, date, month, b.type || 'BORROW', String(b.person).trim(), b.reason || '', amount, b.status || 'PENDING').run();
-            count++;
+              await db.prepare(`
+                INSERT INTO borrow_records (id, date, month, type, person, reason, amount, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              `).bind(id, date, month, type, person, reason, amount, status).run();
+              count++;
+            }
+            return jsonResponse({ success: true, count });
+          } catch (err: any) {
+            return errorResponse(err.message || 'Failed to batch import borrow records', 500);
           }
-          return jsonResponse({ success: true, count });
         }
 
         if (url.pathname.startsWith('/api/budget/borrow/')) {
           const id = url.pathname.replace('/api/budget/borrow/', '');
           if (method === 'PUT') {
-            const b = (await request.json()) as any;
-            const date = (b.date && typeof b.date === 'string' && b.date.trim())
-              ? b.date.trim()
-              : new Date().toISOString().split('T')[0];
-            const month = b.month || date.substring(0, 7);
-            await db.prepare(`
-              UPDATE borrow_records SET date = ?, month = ?, type = ?, person = ?, reason = ?, amount = ?, status = ?
-              WHERE id = ?
-            `).bind(date, month, b.type, b.person, b.reason || '', b.amount, b.status, id).run();
-            return jsonResponse({ success: true });
+            try {
+              const b = (await request.json()) as any;
+              const existing: any = await db.prepare('SELECT * FROM borrow_records WHERE id = ?').bind(id).first();
+              if (!existing) {
+                return errorResponse('Borrow record not found', 404);
+              }
+              const date = (b.date && typeof b.date === 'string' && b.date.trim())
+                ? b.date.trim().substring(0, 10)
+                : existing.date;
+              const month = b.month || date.substring(0, 7);
+              const type = b.type || existing.type || 'BORROW';
+              const person = b.person !== undefined && b.person !== null ? String(b.person).trim() : existing.person;
+              const reason = b.reason !== undefined && b.reason !== null ? String(b.reason).trim() : (existing.reason || '');
+              const amount = b.amount !== undefined && b.amount !== null ? Number(b.amount) : existing.amount;
+              const status = b.status || existing.status || 'PENDING';
+
+              await db.prepare(`
+                UPDATE borrow_records SET date = ?, month = ?, type = ?, person = ?, reason = ?, amount = ?, status = ?
+                WHERE id = ?
+              `).bind(date, month, type, person, reason, amount, status, id).run();
+              return jsonResponse({ success: true, id, month });
+            } catch (err: any) {
+              return errorResponse(err.message || 'Failed to update borrow record', 500);
+            }
           }
           if (method === 'DELETE') {
-            await db.prepare('DELETE FROM borrow_records WHERE id = ?').bind(id).run();
-            return jsonResponse({ success: true });
+            try {
+              await db.prepare('DELETE FROM borrow_records WHERE id = ?').bind(id).run();
+              return jsonResponse({ success: true });
+            } catch (err: any) {
+              return errorResponse(err.message || 'Failed to delete borrow record', 500);
+            }
           }
         }
 

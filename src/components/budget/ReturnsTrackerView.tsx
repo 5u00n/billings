@@ -22,7 +22,7 @@ import { DataImportModal, FieldDefinition } from '../common/DataImportModal';
 interface ReturnsTrackerViewProps {
   records: BorrowRecord[];
   currentMonth: string;
-  onRefresh: () => void;
+  onRefresh: (entryMonth?: string) => void;
 }
 
 const RETURNS_IMPORT_FIELDS: FieldDefinition[] = [
@@ -132,8 +132,10 @@ export const ReturnsTrackerView: React.FC<ReturnsTrackerViewProps> = ({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!person.trim() || !amount || Number(amount) <= 0) {
-      alert('Please fill in contact person and a valid amount.');
+    const cleanPerson = person.trim();
+    const numAmount = Number(amount);
+    if (!cleanPerson || !amount || isNaN(numAmount) || numAmount <= 0) {
+      alert('Please fill in contact person and a valid amount greater than 0.');
       return;
     }
 
@@ -143,33 +145,43 @@ export const ReturnsTrackerView: React.FC<ReturnsTrackerViewProps> = ({
         date,
         month: date.substring(0, 7),
         type: 'RETURN', // Always RETURN
-        person: person.trim(),
+        person: cleanPerson,
         reason: reason.trim() || undefined,
-        amount: Number(amount),
+        amount: numAmount,
         status,
       };
 
+      let res: Response;
       if (editingRecord) {
-        await fetch(`/api/budget/borrow/${editingRecord.id}`, {
+        res = await fetch(`/api/budget/borrow/${editingRecord.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
       } else {
-        await fetch('/api/budget/borrow', {
+        res = await fetch('/api/budget/borrow', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
       }
 
+      if (!res.ok) {
+        let errorMsg = `Server error ${res.status}`;
+        try {
+          const errData = await res.json();
+          if (errData && errData.error) errorMsg = errData.error;
+        } catch {}
+        throw new Error(errorMsg);
+      }
+
       setIsModalOpen(false);
       setEditingRecord(null);
       resetForm();
-      onRefresh();
-    } catch (err) {
+      onRefresh(payload.month);
+    } catch (err: any) {
       console.error('Failed to save return record:', err);
-      alert('Failed to save return record.');
+      alert(`Could not save return record: ${err.message || 'Please check your connection and login.'}`);
     } finally {
       setSaving(false);
     }
@@ -178,7 +190,7 @@ export const ReturnsTrackerView: React.FC<ReturnsTrackerViewProps> = ({
   const handleToggleStatus = async (record: BorrowRecord) => {
     try {
       const nextStatus = record.status === 'SETTLED' ? 'PENDING' : 'SETTLED';
-      await fetch(`/api/budget/borrow/${record.id}`, {
+      const res = await fetch(`/api/budget/borrow/${record.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -186,19 +198,37 @@ export const ReturnsTrackerView: React.FC<ReturnsTrackerViewProps> = ({
           status: nextStatus,
         }),
       });
-      onRefresh();
-    } catch (err) {
+      if (!res.ok) {
+        let errorMsg = `Server error ${res.status}`;
+        try {
+          const errData = await res.json();
+          if (errData?.error) errorMsg = errData.error;
+        } catch {}
+        throw new Error(errorMsg);
+      }
+      onRefresh(record.month);
+    } catch (err: any) {
       console.error('Failed to toggle status:', err);
+      alert(`Could not update status: ${err.message || 'Please try again.'}`);
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this return record?')) return;
     try {
-      await fetch(`/api/budget/borrow/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/budget/borrow/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        let errorMsg = `Server error ${res.status}`;
+        try {
+          const errData = await res.json();
+          if (errData?.error) errorMsg = errData.error;
+        } catch {}
+        throw new Error(errorMsg);
+      }
       onRefresh();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to delete return record:', err);
+      alert(`Could not delete record: ${err.message || 'Please try again.'}`);
     }
   };
 

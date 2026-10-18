@@ -2437,8 +2437,16 @@ app.get('/api/budget/borrow', (req: Request, res: Response) => {
 
 app.post('/api/budget/borrow', (req: Request, res: Response) => {
   const body = req.body;
+  const amount = Number(body.amount);
+  const person = body.person ? String(body.person).trim() : '';
+  if (!person || isNaN(amount) || amount <= 0) {
+    return res.status(400).json({ error: 'Person and a valid amount greater than 0 are required' });
+  }
+
   const id = body.id || `br-${Date.now()}`;
-  const date = body.date || new Date().toISOString().split('T')[0];
+  const date = (body.date && typeof body.date === 'string' && body.date.trim())
+    ? body.date.trim().substring(0, 10)
+    : new Date().toISOString().split('T')[0];
   const month = body.month || date.substring(0, 7);
 
   try {
@@ -2450,12 +2458,12 @@ app.post('/api/budget/borrow', (req: Request, res: Response) => {
       date,
       month,
       body.type || 'BORROW',
-      body.person || 'Person',
-      body.reason || '',
-      Number(body.amount) || 0,
+      person,
+      body.reason ? String(body.reason).trim() : '',
+      amount,
       body.status || 'PENDING'
     );
-    res.json({ success: true, id });
+    res.status(201).json({ success: true, id, month });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }

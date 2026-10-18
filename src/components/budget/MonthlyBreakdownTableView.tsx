@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { formatINR } from '../../utils/numberToWords';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -16,7 +16,29 @@ import {
   PiggyBank,
   CheckCircle2,
   FileSpreadsheet,
+  BarChart3,
+  Layers,
+  ArrowDownLeft,
+  ArrowUpRight,
+  Sparkles,
+  Maximize2,
+  Eye,
+  Info,
 } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  Legend,
+} from 'recharts';
 
 export interface MonthlyBreakdownRow {
   month: string;
@@ -49,6 +71,187 @@ interface MonthlyBreakdownTableViewProps {
   onRefreshParent: () => void;
 }
 
+interface ColumnMetricDef {
+  key: keyof Omit<MonthlyBreakdownRow, 'month' | 'notes'>;
+  label: string;
+  shortLabel: string;
+  category: 'INFLOW' | 'OUTFLOW' | 'DEBT' | 'RESERVE';
+  color: string;
+  strokeColor: string;
+  gradientId: string;
+  description: string;
+}
+
+const COLUMN_DEFINITIONS: ColumnMetricDef[] = [
+  // Inflows
+  {
+    key: 'previous_remaining',
+    label: 'Previous Remaining (Pre.Rem)',
+    shortLabel: 'Pre.Rem',
+    category: 'INFLOW',
+    color: '#6366f1',
+    strokeColor: '#4f46e5',
+    gradientId: 'grad-prerem',
+    description: 'Cash carried over from prior month',
+  },
+  {
+    key: 'salary',
+    label: 'Fixed Salary',
+    shortLabel: 'Salary',
+    category: 'INFLOW',
+    color: '#10b981',
+    strokeColor: '#059669',
+    gradientId: 'grad-sal',
+    description: 'Direct salary credited',
+  },
+  {
+    key: 'freelance',
+    label: 'Freelance & Invoices',
+    shortLabel: 'Freelance',
+    category: 'INFLOW',
+    color: '#06b6d4',
+    strokeColor: '#0891b2',
+    gradientId: 'grad-fl',
+    description: 'Client billings & project income',
+  },
+  {
+    key: 'returns',
+    label: 'Returns (Repaid to Me)',
+    shortLabel: 'Returns',
+    category: 'INFLOW',
+    color: '#14b8a6',
+    strokeColor: '#0d9488',
+    gradientId: 'grad-rt',
+    description: 'Money returned to you by contacts',
+  },
+  {
+    key: 'ext_income',
+    label: 'Extra / Other Income',
+    shortLabel: 'Ext. Income',
+    category: 'INFLOW',
+    color: '#84cc16',
+    strokeColor: '#65a30d',
+    gradientId: 'grad-extinc',
+    description: 'Miscellaneous or bonus cashflows',
+  },
+  {
+    key: 'total_income',
+    label: 'Total Inflow (Cash Available)',
+    shortLabel: 'Total Inflow',
+    category: 'INFLOW',
+    color: '#22c55e',
+    strokeColor: '#16a34a',
+    gradientId: 'grad-totinc',
+    description: 'Cumulative cashflow inflow this month',
+  },
+
+  // Outflows
+  {
+    key: 'reg_expense',
+    label: 'Regular Expenses',
+    shortLabel: 'Reg. Exp',
+    category: 'OUTFLOW',
+    color: '#f97316',
+    strokeColor: '#ea580c',
+    gradientId: 'grad-regexp',
+    description: 'Monthly necessities and fixed lifestyle',
+  },
+  {
+    key: 'ext_expense',
+    label: 'Extra / Irregular Expenses',
+    shortLabel: 'Ext. Exp',
+    category: 'OUTFLOW',
+    color: '#fb7185',
+    strokeColor: '#e11d48',
+    gradientId: 'grad-extexp',
+    description: 'Discretionary, shopping, and emergencies',
+  },
+  {
+    key: 'total_expense',
+    label: 'Total Outflow (Expenses)',
+    shortLabel: 'Total Outflow',
+    category: 'OUTFLOW',
+    color: '#ef4444',
+    strokeColor: '#dc2626',
+    gradientId: 'grad-totexp',
+    description: 'Total spending across all categories',
+  },
+
+  // Debts
+  {
+    key: 'starting_debt',
+    label: 'Starting Debt',
+    shortLabel: 'Start Debt',
+    category: 'DEBT',
+    color: '#a855f7',
+    strokeColor: '#9333ea',
+    gradientId: 'grad-startdebt',
+    description: 'Liabilities brought in at start of month',
+  },
+  {
+    key: 'dept_payment',
+    label: 'Debt Repayments Made',
+    shortLabel: 'Debt Paid',
+    category: 'DEBT',
+    color: '#3b82f6',
+    strokeColor: '#2563eb',
+    gradientId: 'grad-deptpay',
+    description: 'Total debt cleared this month',
+  },
+  {
+    key: 'borrow_amount',
+    label: 'New Borrow / Debt Incurred',
+    shortLabel: 'New Borrow',
+    category: 'DEBT',
+    color: '#f59e0b',
+    strokeColor: '#d97706',
+    gradientId: 'grad-borrow',
+    description: 'New loans taken or money borrowed',
+  },
+  {
+    key: 'ending_debt',
+    label: 'Ending Debt (Carry forward)',
+    shortLabel: 'Ending Debt',
+    category: 'DEBT',
+    color: '#dc2626',
+    strokeColor: '#b91c1c',
+    gradientId: 'grad-enddebt',
+    description: 'Closing debt carried forward to next month',
+  },
+
+  // Reserves & Surplus
+  {
+    key: 'overhead',
+    label: 'Monthly Overhead (Cash Margin)',
+    shortLabel: 'Overhead',
+    category: 'RESERVE',
+    color: '#8b5cf6',
+    strokeColor: '#7c3aed',
+    gradientId: 'grad-ovh',
+    description: 'Inflows + Borrow minus Outflows + Debt Paid',
+  },
+  {
+    key: 'total_savings',
+    label: 'Total Savings Stashed',
+    shortLabel: 'Savings',
+    category: 'RESERVE',
+    color: '#2563eb',
+    strokeColor: '#1d4ed8',
+    gradientId: 'grad-totsav',
+    description: '50% of surplus + manual savings',
+  },
+  {
+    key: 'remaining',
+    label: 'Net Remaining (Next Pre.Rem)',
+    shortLabel: 'Remaining',
+    category: 'RESERVE',
+    color: '#10b981',
+    strokeColor: '#047857',
+    gradientId: 'grad-rem',
+    description: 'Surplus cash carried into next month',
+  },
+];
+
 export const MonthlyBreakdownTableView: React.FC<MonthlyBreakdownTableViewProps> = ({
   selectedMonth,
   onSelectMonth,
@@ -59,6 +262,8 @@ export const MonthlyBreakdownTableView: React.FC<MonthlyBreakdownTableViewProps>
   const [loading, setLoading] = useState(true);
   const [newMonthInput, setNewMonthInput] = useState('');
   const [addingMonth, setAddingMonth] = useState(false);
+  const [activeTab, setActiveTab] = useState<'ALL' | 'INFLOW' | 'OUTFLOW' | 'DEBT' | 'RESERVE' | 'COMPARE'>('ALL');
+  const [spotlightMetric, setSpotlightMetric] = useState<ColumnMetricDef | null>(null);
 
   useEffect(() => {
     fetchBreakdown();
@@ -68,12 +273,18 @@ export const MonthlyBreakdownTableView: React.FC<MonthlyBreakdownTableViewProps>
     try {
       setLoading(true);
       const res = await fetch('/api/budget/monthly-breakdown');
+      if (!res.ok) {
+        throw new Error(`Server returned status ${res.status}`);
+      }
       const data = await res.json();
       if (Array.isArray(data)) {
         setRows(data);
+      } else {
+        setRows([]);
       }
     } catch (err) {
       console.error('Failed to load monthly breakdown:', err);
+      setRows([]);
     } finally {
       setLoading(false);
     }
@@ -92,13 +303,16 @@ export const MonthlyBreakdownTableView: React.FC<MonthlyBreakdownTableViewProps>
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ month: newMonthInput }),
       });
-      if (res.ok) {
-        setNewMonthInput('');
-        await fetchBreakdown();
-        onRefreshParent();
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || `Server error ${res.status}`);
       }
-    } catch (err) {
+      setNewMonthInput('');
+      await fetchBreakdown();
+      onRefreshParent();
+    } catch (err: any) {
       console.error('Failed to add month:', err);
+      alert(`Could not add month: ${err.message || 'Please try again'}`);
     } finally {
       setAddingMonth(false);
     }
@@ -119,6 +333,46 @@ export const MonthlyBreakdownTableView: React.FC<MonthlyBreakdownTableViewProps>
   const totalDebtPaidAll = rows.reduce((sum, r) => sum + r.dept_payment, 0);
   const totalSavingsAll = rows.reduce((sum, r) => sum + r.total_savings, 0);
   const latestDebt = rows.length > 0 ? rows[rows.length - 1].ending_debt : 0;
+
+  // Chart Formatted Data
+  const chartData = useMemo(() => {
+    return rows.map((r) => {
+      const parts = r.month.split('-');
+      let label = r.month;
+      if (parts.length === 2) {
+        const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
+        label = d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+      }
+      return {
+        ...r,
+        displayMonth: label,
+      };
+    });
+  }, [rows]);
+
+  // Filtered metrics based on active tab
+  const displayedMetrics = useMemo(() => {
+    if (activeTab === 'ALL' || activeTab === 'COMPARE') return COLUMN_DEFINITIONS;
+    return COLUMN_DEFINITIONS.filter((m) => m.category === activeTab);
+  }, [activeTab]);
+
+  // Custom Tooltip for Recharts
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-slate-900/95 text-white p-2.5 rounded-xl border border-slate-700/80 shadow-xl text-xs backdrop-blur-xs">
+          <p className="font-bold text-slate-300 text-[11px] mb-1">{label}</p>
+          {payload.map((p: any, i: number) => (
+            <div key={i} className="flex items-center justify-between gap-3 font-semibold">
+              <span style={{ color: p.color || p.stroke }}>{p.name}:</span>
+              <span className="tabular-nums">₹{formatINR(Number(p.value) || 0)}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    return null;
+  };
 
   return (
     <div className="space-y-6">
@@ -159,7 +413,7 @@ export const MonthlyBreakdownTableView: React.FC<MonthlyBreakdownTableViewProps>
                 size="sm"
                 variant="outline"
                 disabled={addingMonth || !newMonthInput}
-                className="text-xs h-8 gap-1"
+                className="text-xs h-8 gap-1 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 Add Month
@@ -170,7 +424,7 @@ export const MonthlyBreakdownTableView: React.FC<MonthlyBreakdownTableViewProps>
               size="sm"
               variant="outline"
               onClick={fetchBreakdown}
-              className="text-xs h-8 gap-1"
+              className="text-xs h-8 gap-1 cursor-pointer"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               Refresh
@@ -246,7 +500,7 @@ export const MonthlyBreakdownTableView: React.FC<MonthlyBreakdownTableViewProps>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={18} className="py-8 text-center text-slate-400">
+                  <td colSpan={18} className="py-12 text-center text-slate-400">
                     {loading ? 'Calculating multi-month sequential ledger...' : 'No monthly records found.'}
                   </td>
                 </tr>
@@ -389,6 +643,370 @@ export const MonthlyBreakdownTableView: React.FC<MonthlyBreakdownTableViewProps>
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* ============================================================== */}
+      {/* COLUMN TRENDS & ANALYTICS VISUALIZER (UNDER THE TABLE)         */}
+      {/* ============================================================== */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-5 shadow-2xs space-y-5">
+        {/* Hub Header */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800/80 pb-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+              <BarChart3 className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                Column Visual Trends & Charts
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                  {COLUMN_DEFINITIONS.length} Metrics Analyzed
+                </span>
+              </h4>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Month-by-month trajectory and growth graphs for each ledger column. Click any card to expand inspection.
+              </p>
+            </div>
+          </div>
+
+          {/* Category Filter Tabs */}
+          <div className="flex flex-wrap items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold">
+            <button
+              onClick={() => setActiveTab('ALL')}
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                activeTab === 'ALL'
+                  ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              All Columns ({COLUMN_DEFINITIONS.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('INFLOW')}
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                activeTab === 'INFLOW'
+                  ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-2xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-emerald-600'
+              }`}
+            >
+              Inflows
+            </button>
+            <button
+              onClick={() => setActiveTab('OUTFLOW')}
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                activeTab === 'OUTFLOW'
+                  ? 'bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 shadow-2xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-rose-600'
+              }`}
+            >
+              Outflows
+            </button>
+            <button
+              onClick={() => setActiveTab('DEBT')}
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                activeTab === 'DEBT'
+                  ? 'bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-2xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-amber-600'
+              }`}
+            >
+              Debt & Loans
+            </button>
+            <button
+              onClick={() => setActiveTab('RESERVE')}
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                activeTab === 'RESERVE'
+                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-indigo-600'
+              }`}
+            >
+              Surplus & Savings
+            </button>
+            <button
+              onClick={() => setActiveTab('COMPARE')}
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                activeTab === 'COMPARE'
+                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-2xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-blue-600'
+              }`}
+            >
+              Comparison Overlay
+            </button>
+          </div>
+        </div>
+
+        {/* COMPARISON OVERVIEW CHART (Shown when on COMPARE or when rows exist) */}
+        {activeTab === 'COMPARE' && (
+          <div className="p-4 rounded-xl bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h5 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                  Comprehensive Cashflow & Debt Overlay
+                </h5>
+                <p className="text-[11px] text-slate-500">
+                  Total Inflow vs Total Outflow vs Net Remaining vs Ending Debt across all recorded months
+                </p>
+              </div>
+            </div>
+
+            <div className="h-64 w-full">
+              {chartData.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-xs text-slate-400">
+                  No monthly data to render chart
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="comp-inflow" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
+                      </linearGradient>
+                      <linearGradient id="comp-outflow" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.4} />
+                        <stop offset="95%" stopColor="#f43f5e" stopOpacity={0.0} />
+                      </linearGradient>
+                      <linearGradient id="comp-rem" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.4} />
+                        <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.0} />
+                      </linearGradient>
+                      <linearGradient id="comp-debt" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#dc2626" stopOpacity={0.4} />
+                        <stop offset="95%" stopColor="#dc2626" stopOpacity={0.0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                    <XAxis dataKey="displayMonth" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
+                    <YAxis
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={(val) => `₹${(val / 1000).toFixed(0)}k`}
+                      tick={{ fontSize: 10 }}
+                    />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+                    <Area
+                      type="monotone"
+                      dataKey="total_income"
+                      name="Total Inflow"
+                      stroke="#10b981"
+                      fill="url(#comp-inflow)"
+                      strokeWidth={2}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="total_expense"
+                      name="Total Outflow"
+                      stroke="#f43f5e"
+                      fill="url(#comp-outflow)"
+                      strokeWidth={2}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="remaining"
+                      name="Net Remaining"
+                      stroke="#06b6d4"
+                      fill="url(#comp-rem)"
+                      strokeWidth={2}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="ending_debt"
+                      name="Ending Debt"
+                      stroke="#dc2626"
+                      strokeWidth={2.5}
+                      dot={{ r: 4 }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* SPOTLIGHT INSPECTOR (When a user clicks on any card to examine) */}
+        {spotlightMetric && (
+          <div className="p-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/60 animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: spotlightMetric.color }} />
+                <h5 className="text-xs font-bold text-slate-900 dark:text-white">
+                  Spotlight Inspector: {spotlightMetric.label}
+                </h5>
+                <Badge variant="outline" className="text-[10px]">
+                  {spotlightMetric.category}
+                </Badge>
+              </div>
+              <button
+                onClick={() => setSpotlightMetric(null)}
+                className="text-[11px] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 font-semibold cursor-pointer"
+              >
+                Close Inspector ✕
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
+              <div className="space-y-2 text-xs">
+                <p className="text-slate-600 dark:text-slate-400 text-[11px]">
+                  {spotlightMetric.description}
+                </p>
+                <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-blue-100 dark:border-blue-950/60 space-y-1">
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-slate-500">Timeline Average:</span>
+                    <span className="font-bold tabular-nums">
+                      ₹{formatINR(Math.round(chartData.reduce((s, r) => s + (Number(r[spotlightMetric.key]) || 0), 0) / (chartData.length || 1)))}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-slate-500">Peak Month:</span>
+                    <span className="font-bold tabular-nums text-emerald-600">
+                      ₹{formatINR(Math.max(...chartData.map((r) => Number(r[spotlightMetric.key]) || 0), 0))}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-slate-500">Lowest Month:</span>
+                    <span className="font-bold tabular-nums text-slate-700 dark:text-slate-300">
+                      ₹{formatINR(Math.min(...chartData.map((r) => Number(r[spotlightMetric.key]) || 0), 0))}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="md:col-span-3 h-48 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                    <XAxis dataKey="displayMonth" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
+                    <YAxis
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={(val) => `₹${(val / 1000).toFixed(0)}k`}
+                      tick={{ fontSize: 10 }}
+                    />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Bar
+                      dataKey={spotlightMetric.key}
+                      name={spotlightMetric.label}
+                      fill={spotlightMetric.color}
+                      radius={[4, 4, 0, 0]}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 16 COLUMN MINI-CHARTS GRID */}
+        {activeTab !== 'COMPARE' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+            {displayedMetrics.map((col) => {
+              const values = chartData.map((r) => Number(r[col.key]) || 0);
+              const latestVal = values.length > 0 ? values[values.length - 1] : 0;
+              const prevVal = values.length > 1 ? values[values.length - 2] : latestVal;
+              const diff = latestVal - prevVal;
+              const isSelected = spotlightMetric?.key === col.key;
+
+              return (
+                <div
+                  key={col.key}
+                  onClick={() => setSpotlightMetric(isSelected ? null : col)}
+                  className={`p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
+                    isSelected
+                      ? 'bg-blue-50/60 dark:bg-blue-950/40 border-blue-400 dark:border-blue-600 shadow-md ring-2 ring-blue-500/20'
+                      : 'bg-slate-50/60 dark:bg-slate-800/30 hover:bg-slate-100/70 dark:hover:bg-slate-800/60 border-slate-200/70 dark:border-slate-800 shadow-2xs'
+                  }`}
+                >
+                  {/* Card Header */}
+                  <div>
+                    <div className="flex items-center justify-between gap-1 mb-1.5">
+                      <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200 truncate" title={col.label}>
+                        {col.shortLabel}
+                      </span>
+                      <span
+                        className="text-[9px] font-bold px-1.5 py-0.2 rounded-md uppercase tracking-wider"
+                        style={{
+                          backgroundColor: `${col.color}15`,
+                          color: col.strokeColor,
+                        }}
+                      >
+                        {col.category}
+                      </span>
+                    </div>
+
+                    {/* Latest Value & Trend */}
+                    <div className="flex items-baseline justify-between gap-2 mb-2">
+                      <span className="text-sm font-extrabold text-slate-900 dark:text-white tabular-nums">
+                        ₹{formatINR(latestVal)}
+                      </span>
+                      {values.length > 1 && (
+                        <span
+                          className={`text-[10px] font-bold flex items-center gap-0.5 tabular-nums ${
+                            diff > 0
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : diff < 0
+                              ? 'text-rose-600 dark:text-rose-400'
+                              : 'text-slate-400'
+                          }`}
+                        >
+                          {diff > 0 ? (
+                            <>
+                              <ArrowUpRight className="w-2.5 h-2.5" />
+                              +₹{formatINR(diff)}
+                            </>
+                          ) : diff < 0 ? (
+                            <>
+                              <ArrowDownLeft className="w-2.5 h-2.5" />
+                              -₹{formatINR(Math.abs(diff))}
+                            </>
+                          ) : (
+                            '0'
+                          )}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Sparkline Area Chart */}
+                  <div className="h-16 w-full pt-1">
+                    {chartData.length === 0 ? (
+                      <div className="h-full flex items-center justify-center text-[10px] text-slate-400">
+                        No data
+                      </div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={chartData} margin={{ top: 2, right: 2, left: 2, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id={col.gradientId} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor={col.color} stopOpacity={0.35} />
+                              <stop offset="95%" stopColor={col.color} stopOpacity={0.0} />
+                            </linearGradient>
+                          </defs>
+                          <XAxis dataKey="displayMonth" hide />
+                          <YAxis hide domain={['dataMin - 100', 'dataMax + 100']} />
+                          <Tooltip content={<CustomTooltip />} />
+                          <Area
+                            type="monotone"
+                            dataKey={col.key}
+                            name={col.label}
+                            stroke={col.strokeColor}
+                            fill={`url(#${col.gradientId})`}
+                            strokeWidth={1.8}
+                            dot={{ r: 2.5, fill: col.strokeColor }}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+
+                  {/* Footer hint */}
+                  <div className="mt-2 pt-1.5 border-t border-slate-200/50 dark:border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400">
+                    <span className="truncate">{col.description}</span>
+                    <Eye className="w-3 h-3 text-slate-400 shrink-0 ml-1" />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Visual Explanation of the Excel Formula */}

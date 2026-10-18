@@ -648,14 +648,28 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
           <ReturnsTrackerView
             records={borrows}
             currentMonth={selectedMonth}
-            onRefresh={() => loadMonthData(selectedMonth)}
+            onRefresh={(entryMonth?: string) => {
+              fetchMonths();
+              if (entryMonth && entryMonth !== selectedMonth) {
+                setSelectedMonth(entryMonth);
+              } else {
+                loadMonthData(selectedMonth);
+              }
+            }}
           />
         )}
 
         {activeSubTab === 'borrow' && (
           <BorrowReturnsView
             records={borrows}
-            onRefresh={() => loadMonthData(selectedMonth)}
+            onRefresh={(entryMonth?: string) => {
+              fetchMonths();
+              if (entryMonth && entryMonth !== selectedMonth) {
+                setSelectedMonth(entryMonth);
+              } else {
+                loadMonthData(selectedMonth);
+              }
+            }}
           />
         )}
 

@@ -122,6 +122,7 @@ export const offlineCache = {
       offlineCache.invalidate('/api/budget/months');
       offlineCache.invalidate('/api/budget/summary');
       offlineCache.invalidate('/api/budget/month-bundle');
+      offlineCache.invalidate('/api/budget/monthly-breakdown');
       offlineCache.invalidate('/api/budget/allocations');
       offlineCache.invalidate('/api/budget/current-account');
     } else if (mutationUrl.includes('/api/budget/borrow')) {
@@ -129,7 +130,13 @@ export const offlineCache = {
       offlineCache.invalidate('/api/budget/months');
       offlineCache.invalidate('/api/budget/summary');
       offlineCache.invalidate('/api/budget/month-bundle');
+      offlineCache.invalidate('/api/budget/monthly-breakdown');
       offlineCache.invalidate('/api/budget/allocations');
+    } else if (mutationUrl.includes('/api/budget/months')) {
+      offlineCache.invalidate('/api/budget/months');
+      offlineCache.invalidate('/api/budget/month-bundle');
+      offlineCache.invalidate('/api/budget/monthly-breakdown');
+      offlineCache.invalidate('/api/budget/summary');
     } else if (mutationUrl.includes('/api/budget/goals')) {
       offlineCache.invalidate('/api/budget/goals');
       offlineCache.invalidate('/api/budget/month-bundle');

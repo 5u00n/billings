@@ -20,14 +20,25 @@
 	//   }
 	// ],
 	"vars": {
-		"BACKEND_URL": ""
+		"BACKEND_URL": "",
+		"VITE_FIREBASE_API_KEY": "AIzaSyBCEsFv2lcfyJH2-VTYcM3OnIVGqz-_Kq4",
+		"VITE_FIREBASE_AUTH_DOMAIN": "suren-billings-app.firebaseapp.com",
+		"VITE_FIREBASE_PROJECT_ID": "suren-billings-app",
+		"VITE_FIREBASE_STORAGE_BUCKET": "suren-billings-app.firebasestorage.app",
+		"VITE_FIREBASE_MESSAGING_SENDER_ID": "1014950442669",
+		"VITE_FIREBASE_APP_ID": "1:1014950442669:web:99e5f3e3f9169bf9037824",
+		"VITE_ALLOWED_EMAILS": "surenhembram97@gmail.com,me.ben007@gmail.com"
 	},
 	"d1_databases": [
 		{
+			"binding": "DB",
+			"database_name": "billings-db",
+			"database_id": "2a1acdac-b712-42de-b1b8-7f68ca6f6043"
+		},
+		{
 			"binding": "billings_db",
 			"database_name": "billings-db",
-			"database_id": "2a1acdac-b712-42de-b1b8-7f68ca6f6043",
-			"remote": true
+			"database_id": "2a1acdac-b712-42de-b1b8-7f68ca6f6043"
 		}
 	]
 }

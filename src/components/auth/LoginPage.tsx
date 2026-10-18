@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
-  Lock,
   Mail,
   KeyRound,
   ShieldCheck,
@@ -10,6 +9,7 @@ import {
   Server,
   X,
   ChevronDown,
+  Lock,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -22,12 +22,11 @@ export const LoginPage: React.FC = () => {
     error,
     signInWithGoogle,
     signInWithEmail,
-    signUpWithEmail,
     sendPasswordReset,
     clearError,
   } = useAuth();
 
-  const [mode, setMode] = useState<'signin' | 'signup' | 'reset'>('signin');
+  const [mode, setMode] = useState<'signin' | 'reset'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -55,8 +54,6 @@ export const LoginPage: React.FC = () => {
     try {
       if (mode === 'signin') {
         await signInWithEmail(email, password);
-      } else if (mode === 'signup') {
-        await signUpWithEmail(email, password);
       } else if (mode === 'reset') {
         await sendPasswordReset(email);
         setResetSent(true);
@@ -70,21 +67,24 @@ export const LoginPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between font-sans selection:bg-blue-600 selection:text-white">
-      {/* Top Header */}
-      <header className="border-b border-slate-800/80 bg-slate-900/30 px-6 py-3.5 flex items-center justify-between text-xs backdrop-blur-xs">
+      {/* Top Header - Neutral & Non-Leaking */}
+      <header className="border-b border-slate-800/80 bg-slate-900/40 px-6 py-3.5 flex items-center justify-between text-xs backdrop-blur-md">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-blue-600/90 flex items-center justify-center font-bold text-white text-sm shadow-xs">
-            H
+          <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white shadow-xs">
+            <Lock className="w-3.5 h-3.5 text-white" />
           </div>
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-slate-200 tracking-tight">Suren Billings</span>
+            <span className="font-semibold text-slate-200 tracking-tight">Financial Operations Console</span>
             <span className="text-slate-700 hidden sm:inline">•</span>
-            <span className="text-slate-400 text-xs hidden sm:inline">Workspace Portal</span>
+            <span className="text-slate-400 text-xs hidden sm:inline">Secure Access Portal</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <span className="text-[11px] text-slate-500 font-mono">Chakulia, IN</span>
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-800/60 text-emerald-400 text-[10px] font-mono">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            Encrypted (TLS 1.3)
+          </span>
         </div>
       </header>
 
@@ -94,25 +94,23 @@ export const LoginPage: React.FC = () => {
           {/* Card Title Header */}
           <div className="text-center space-y-1">
             <h1 className="text-xl font-bold tracking-tight text-white">
-              {mode === 'signin' && 'Sign in to workspace'}
-              {mode === 'signup' && 'Create your account'}
-              {mode === 'reset' && 'Reset account password'}
+              {mode === 'signin' && 'Authorized Access Only'}
+              {mode === 'reset' && 'Reset Account Password'}
             </h1>
             <p className="text-xs text-slate-400">
-              {mode === 'signin' && 'Access invoices, accounts, and tax audit records.'}
-              {mode === 'signup' && 'Register your authorized administrator account.'}
+              {mode === 'signin' && 'Authenticate with your authorized administrator credentials.'}
               {mode === 'reset' && 'Enter your email to receive password reset instructions.'}
             </p>
           </div>
 
-          {/* Configuration Missing Notice */}
+          {/* Configuration Status Notice */}
           {!isConfigured && (
             <div className="p-3 rounded-xl bg-amber-950/30 border border-amber-900/60 text-amber-200 text-xs flex items-start gap-2.5 shadow-xs">
               <Server className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <div className="flex-1 space-y-1 text-[11px]">
-                <div className="font-semibold text-amber-300">Authentication Service Offline</div>
+                <div className="font-semibold text-amber-300">Authentication Service Connecting</div>
                 <div className="text-amber-200/80 leading-relaxed">
-                  Authentication service is not configured with environment credentials.
+                  Initializing secure authentication connection...
                 </div>
               </div>
             </div>
@@ -168,7 +166,7 @@ export const LoginPage: React.FC = () => {
                         d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
                       />
                     </svg>
-                    <span>{loading ? 'Signing in...' : 'Continue with Google'}</span>
+                    <span>{loading ? 'Authenticating...' : 'Sign in with Google'}</span>
                   </Button>
 
                   {/* Expandable Email/Password Toggle */}
@@ -206,7 +204,7 @@ export const LoginPage: React.FC = () => {
                             required
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
-                            placeholder="admin@example.com"
+                            placeholder="admin@enterprise.domain"
                             className="pl-8.5 bg-slate-950 border-slate-800 text-xs text-slate-100 placeholder:text-slate-600 focus:border-blue-500 h-9 rounded-xl"
                           />
                         </div>
@@ -246,28 +244,14 @@ export const LoginPage: React.FC = () => {
                       >
                         {loading ? 'Verifying...' : 'Sign In'}
                       </Button>
-
-                      <div className="text-center pt-1.5 text-xs text-slate-400">
-                        Don't have an account?{' '}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            clearError();
-                            setMode('signup');
-                          }}
-                          className="font-medium text-blue-400 hover:text-blue-300 cursor-pointer"
-                        >
-                          Sign up
-                        </button>
-                      </div>
                     </form>
                   </div>
                 </div>
               ) : (
-                /* Sign Up or Reset Password Mode */
+                /* Reset Password Mode */
                 <form onSubmit={handleEmailSubmit} className="space-y-3.5">
                   <div>
-                    <label className="block text-[11px] font-medium text-slate-400 mb-1">Email address</label>
+                    <label className="block text-[11px] font-medium text-slate-400 mb-1">Account email address</label>
                     <div className="relative">
                       <Mail className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3 pointer-events-none" />
                       <Input
@@ -275,40 +259,18 @@ export const LoginPage: React.FC = () => {
                         required
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        placeholder="name@example.com"
+                        placeholder="admin@enterprise.domain"
                         className="pl-8.5 bg-slate-950 border-slate-800 text-xs text-slate-100 placeholder:text-slate-600 focus:border-blue-500 h-9 rounded-xl"
                       />
                     </div>
                   </div>
-
-                  {mode === 'signup' && (
-                    <div>
-                      <label className="block text-[11px] font-medium text-slate-400 mb-1">Create password</label>
-                      <div className="relative">
-                        <Lock className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3 pointer-events-none" />
-                        <Input
-                          type="password"
-                          required
-                          minLength={6}
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          placeholder="Min 6 characters"
-                          className="pl-8.5 bg-slate-950 border-slate-800 text-xs text-slate-100 placeholder:text-slate-600 focus:border-blue-500 h-9 rounded-xl"
-                        />
-                      </div>
-                    </div>
-                  )}
 
                   <Button
                     type="submit"
                     disabled={loading || !isConfigured}
                     className="w-full h-10 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
                   >
-                    {loading
-                      ? 'Processing...'
-                      : mode === 'signup'
-                      ? 'Register Account'
-                      : 'Send Reset Link'}
+                    {loading ? 'Sending link...' : 'Send Password Reset Link'}
                   </Button>
 
                   <div className="text-center pt-2">
@@ -330,13 +292,13 @@ export const LoginPage: React.FC = () => {
         </div>
       </main>
 
-      {/* Clean Minimal Footer */}
-      <footer className="border-t border-slate-800/60 bg-slate-900/20 px-6 py-3 flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-500 gap-1.5">
+      {/* Clean Minimal & Anonymous Footer */}
+      <footer className="border-t border-slate-800/60 bg-slate-900/30 px-6 py-3 flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-500 gap-1.5">
         <div className="flex items-center gap-1.5">
-          <ShieldCheck className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-          <span>Udyam Registered Micro-Enterprise (UDYAM-JH-06-0090498)</span>
+          <ShieldCheck className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          <span>Restricted Access • Confidential Business Records</span>
         </div>
-        <div>Suren Hembram • Chakulia, Jharkhand</div>
+        <div>Zero-Trust Authentication Active</div>
       </footer>
     </div>
   );

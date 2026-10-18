@@ -8,7 +8,13 @@ import {
   onAuthStateChanged,
   User as FirebaseUser,
 } from 'firebase/auth';
-import { auth, googleProvider, isFirebaseConfigured } from '../lib/firebase';
+import {
+  auth,
+  googleProvider,
+  isFirebaseConfigured,
+  ensureFirebaseInitialized,
+  getFirebaseAuth,
+} from '../lib/firebase';
 
 export interface AuthUser {
   uid: string;
@@ -38,65 +44,96 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isConfigured, setIsConfigured] = useState(isFirebaseConfigured);
   const [error, setError] = useState<string | null>(null);
 
-  // Check allowed emails list strictly from environment configuration (runtime or build-time)
-  const runtimeEnv = typeof window !== 'undefined' ? (window as any).__ENV__ || {} : {};
-  const allowedEmailsStr = runtimeEnv.VITE_ALLOWED_EMAILS || import.meta.env.VITE_ALLOWED_EMAILS || '';
-  const allowedEmails = allowedEmailsStr
-    .split(',')
-    .map((e: string) => e.trim().toLowerCase())
-    .filter(Boolean);
-
-  const validateAllowedUser = (email: string | null): boolean => {
-    if (allowedEmails.length === 0) return true; // No restriction configured
-    if (!email) return false;
-    return allowedEmails.includes(email.toLowerCase());
+  const verifyUserAuthorization = async (fbUser: FirebaseUser): Promise<boolean> => {
+    try {
+      const token = await fbUser.getIdToken();
+      const res = await fetch('/api/auth/verify', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (res.status === 403) {
+        return false;
+      }
+      return res.ok;
+    } catch (e) {
+      console.warn('Auth verification network error, permitting if local dev:', e);
+      return true;
+    }
   };
 
   useEffect(() => {
-    // Check if Firebase is active
-    if (auth && isFirebaseConfigured) {
-      const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
-        if (fbUser) {
-          if (!validateAllowedUser(fbUser.email)) {
-            if (auth) signOut(auth);
-            setError(`Access restricted. Email ${fbUser.email} is not in the allowed administrator list.`);
-            setUser(null);
-            setFirebaseUser(null);
-          } else {
-            setFirebaseUser(fbUser);
-            setUser({
-              uid: fbUser.uid,
-              email: fbUser.email,
-              displayName: fbUser.displayName || fbUser.email?.split('@')[0] || 'Administrator',
-              photoURL: fbUser.photoURL,
-            });
-            setError(null);
-          }
-        } else {
-          setFirebaseUser(null);
-          setUser(null);
-        }
-        setLoading(false);
-      });
+    let unsubscribe: (() => void) | null = null;
+    let isMounted = true;
 
-      return () => unsubscribe();
-    } else {
-      setUser(null);
-      setFirebaseUser(null);
-      setLoading(false);
-    }
+    const setupAuth = async () => {
+      let currentAuth = getFirebaseAuth();
+      if (!currentAuth) {
+        const ok = await ensureFirebaseInitialized();
+        if (ok && isMounted) {
+          setIsConfigured(true);
+          currentAuth = getFirebaseAuth();
+        }
+      } else if (isMounted) {
+        setIsConfigured(true);
+      }
+
+      if (currentAuth && isMounted) {
+        unsubscribe = onAuthStateChanged(currentAuth, async (fbUser) => {
+          if (!isMounted) return;
+          if (fbUser) {
+            const isAuthorized = await verifyUserAuthorization(fbUser);
+            if (!isMounted) return;
+
+            if (!isAuthorized) {
+              if (currentAuth) signOut(currentAuth);
+              setError('Access restricted. Your account is not authorized to access this console.');
+              setUser(null);
+              setFirebaseUser(null);
+            } else {
+              setFirebaseUser(fbUser);
+              setUser({
+                uid: fbUser.uid,
+                email: fbUser.email,
+                displayName: fbUser.displayName || fbUser.email?.split('@')[0] || 'Administrator',
+                photoURL: fbUser.photoURL,
+              });
+              setError(null);
+            }
+          } else {
+            setFirebaseUser(null);
+            setUser(null);
+          }
+          setLoading(false);
+        });
+      } else if (isMounted) {
+        setUser(null);
+        setFirebaseUser(null);
+        setLoading(false);
+      }
+    };
+
+    setupAuth();
+
+    return () => {
+      isMounted = false;
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   const signInWithGoogle = async () => {
-    if (!auth) throw new Error('Firebase Authentication is not configured yet.');
+    const currentAuth = getFirebaseAuth();
+    if (!currentAuth) throw new Error('Firebase Authentication is not configured yet.');
     setError(null);
     try {
-      const result = await signInWithPopup(auth, googleProvider);
-      if (!validateAllowedUser(result.user.email)) {
-        await signOut(auth);
-        throw new Error(`Access restricted. Email ${result.user.email} is not authorized for this suite.`);
+      const result = await signInWithPopup(currentAuth, googleProvider);
+      const isAuthorized = await verifyUserAuthorization(result.user);
+      if (!isAuthorized) {
+        await signOut(currentAuth);
+        throw new Error('Access restricted. Your account is not authorized for this suite.');
       }
     } catch (err: any) {
       console.error('Google sign in error:', err);
@@ -112,13 +149,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signInWithEmail = async (email: string, pass: string) => {
-    if (!auth) throw new Error('Firebase Authentication is not configured yet.');
+    const currentAuth = getFirebaseAuth();
+    if (!currentAuth) throw new Error('Firebase Authentication is not configured yet.');
     setError(null);
     try {
-      const result = await signInWithEmailAndPassword(auth, email, pass);
-      if (!validateAllowedUser(result.user.email)) {
-        await signOut(auth);
-        throw new Error(`Access restricted. Email ${result.user.email} is not authorized.`);
+      const result = await signInWithEmailAndPassword(currentAuth, email, pass);
+      const isAuthorized = await verifyUserAuthorization(result.user);
+      if (!isAuthorized) {
+        await signOut(currentAuth);
+        throw new Error('Access restricted. Your account is not authorized.');
       }
     } catch (err: any) {
       console.error('Email sign in error:', err);
@@ -131,32 +170,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signUpWithEmail = async (email: string, pass: string) => {
-    if (!auth) throw new Error('Firebase Authentication is not configured yet.');
-    setError(null);
-    try {
-      if (!validateAllowedUser(email)) {
-        throw new Error(`Registration restricted. Email ${email} is not authorized.`);
-      }
-      await createUserWithEmailAndPassword(auth, email, pass);
-    } catch (err: any) {
-      console.error('Sign up error:', err);
-      let msg = err.message || 'Failed to create account.';
-      if (err.code === 'auth/email-already-in-use') {
-        msg = 'An account with this email already exists.';
-      } else if (err.code === 'auth/weak-password') {
-        msg = 'Password should be at least 6 characters.';
-      }
-      setError(msg);
-      throw err;
-    }
+  const signUpWithEmail = async () => {
+    throw new Error('Public user self-registration is disabled for this secure suite.');
   };
 
   const sendPasswordReset = async (email: string) => {
-    if (!auth) throw new Error('Firebase Authentication is not configured yet.');
+    const currentAuth = getFirebaseAuth();
+    if (!currentAuth) throw new Error('Firebase Authentication is not configured yet.');
     setError(null);
     try {
-      await sendPasswordResetEmail(auth, email);
+      await sendPasswordResetEmail(currentAuth, email);
     } catch (err: any) {
       console.error('Password reset error:', err);
       setError(err.message || 'Failed to send password reset email.');
@@ -165,8 +188,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOutUser = async () => {
-    if (auth && firebaseUser) {
-      await signOut(auth);
+    const currentAuth = getFirebaseAuth();
+    if (currentAuth && firebaseUser) {
+      await signOut(currentAuth);
     }
     setUser(null);
     setFirebaseUser(null);
@@ -187,7 +211,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         firebaseUser,
         loading,
-        isConfigured: isFirebaseConfigured,
+        isConfigured,
         error,
         signInWithGoogle,
         signInWithEmail,

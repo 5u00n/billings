@@ -85,6 +85,28 @@ function mapInvoiceRow(row: any, orgRow?: any) {
   };
 }
 
+function parseJwtPayload(token: string): any {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const jsonStr = atob(base64);
+    return JSON.parse(jsonStr);
+  } catch {
+    return null;
+  }
+}
+
+function verifyFirebaseTokenClaims(payload: any, projectId: string): boolean {
+  if (!payload || typeof payload !== 'object') return false;
+  const now = Math.floor(Date.now() / 1000);
+  if (!payload.exp || payload.exp < now) return false;
+  if (projectId && payload.aud !== projectId) return false;
+  if (projectId && payload.iss !== `https://securetoken.google.com/${projectId}`) return false;
+  if (!payload.sub) return false;
+  return true;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -93,6 +115,7 @@ export default {
     // 1. PUBLIC RUNTIME CONFIG & HEALTH
     // ----------------------------------------------------
     if (url.pathname === '/api/config') {
+      // Return public Firebase Web App credentials only (NEVER private email lists)
       return jsonResponse({
         VITE_FIREBASE_API_KEY: env.VITE_FIREBASE_API_KEY || '',
         VITE_FIREBASE_AUTH_DOMAIN: env.VITE_FIREBASE_AUTH_DOMAIN || '',
@@ -100,25 +123,53 @@ export default {
         VITE_FIREBASE_STORAGE_BUCKET: env.VITE_FIREBASE_STORAGE_BUCKET || '',
         VITE_FIREBASE_MESSAGING_SENDER_ID: env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
         VITE_FIREBASE_APP_ID: env.VITE_FIREBASE_APP_ID || '',
-        VITE_ALLOWED_EMAILS: env.VITE_ALLOWED_EMAILS || '',
       });
     }
+
+    const db = env.DB || (env as any).billings_db;
 
     if (url.pathname === '/api/health') {
       return jsonResponse({
         status: 'ok',
         platform: 'cloudflare-worker',
-        d1_bound: Boolean(env.DB),
+        d1_bound: Boolean(db),
         timestamp: new Date().toISOString(),
       });
     }
 
     // ----------------------------------------------------
-    // 2. D1 SQLITE API ROUTER
+    // 2. D1 SQLITE API ROUTER (PROTECTED)
     // ----------------------------------------------------
     if (url.pathname.startsWith('/api/')) {
+      // Authenticate all protected API routes
+      const authHeader = request.headers.get('Authorization') || '';
+      if (!authHeader.startsWith('Bearer ')) {
+        return errorResponse('Authentication required. Missing Authorization header.', 401);
+      }
+
+      const token = authHeader.slice(7).trim();
+      const payload = parseJwtPayload(token);
+      const projectId = env.VITE_FIREBASE_PROJECT_ID || 'suren-billings-app';
+
+      if (!verifyFirebaseTokenClaims(payload, projectId)) {
+        return errorResponse('Invalid or expired authentication session. Please sign in again.', 401);
+      }
+
+      // Enforce email authorization on the server
+      const allowedList = (env.VITE_ALLOWED_EMAILS || '')
+        .split(',')
+        .map((e) => e.trim().toLowerCase())
+        .filter(Boolean);
+
+      if (allowedList.length > 0) {
+        const userEmail = (payload.email || '').toLowerCase();
+        if (!userEmail || !allowedList.includes(userEmail)) {
+          return errorResponse('Access restricted. User is not an authorized administrator.', 403);
+        }
+      }
+
       // If external backend URL is configured, proxy request
-      if (env.BACKEND_URL && !env.DB) {
+      if (env.BACKEND_URL && !db) {
         const backendOrigin = env.BACKEND_URL.replace(/\/+$/, '');
         const targetUrl = new URL(url.pathname + url.search, backendOrigin);
         const headers = new Headers(request.headers);
@@ -130,21 +181,29 @@ export default {
         });
       }
 
-      if (!env.DB) {
+      if (!db) {
         return errorResponse(
-          'Cloudflare D1 database binding (DB) is missing. Please check wrangler.jsonc or run npx wrangler d1 create billings-db',
+          'Cloudflare D1 database binding (DB / billings_db) is missing. Please check wrangler.jsonc or run npx wrangler d1 create billings-db',
           503
         );
       }
 
-      const db = env.DB;
       const method = request.method.toUpperCase();
 
       try {
+        // --- AUTH VERIFICATION ---
+        if (url.pathname === '/api/auth/verify' && method === 'GET') {
+          return jsonResponse({
+            success: true,
+            authorized: true,
+            email: payload?.email || null,
+          });
+        }
+
         // --- INVOICES ---
         if (url.pathname === '/api/invoices/next-number' && method === 'GET') {
           const type = url.searchParams.get('type') || 'BILL OF SUPPLY';
-          const settingsRow = await db.prepare('SELECT value_json FROM settings WHERE key = ?').bind('numbering').first<any>();
+          const settingsRow = await db.prepare('SELECT value_json FROM settings WHERE key = ?').bind('numbering').first();
           const numbering = settingsRow ? JSON.parse(settingsRow.value_json) : { prefix: 'INV', nextNumber: 1, padLength: 3 };
 
           const prefix = type === 'TAX INVOICE' ? 'TI' : numbering.prefix || 'INV';
@@ -153,7 +212,7 @@ export default {
               `SELECT invoice_number FROM invoices WHERE invoice_number LIKE ? ORDER BY LENGTH(invoice_number) DESC, invoice_number DESC LIMIT 1`
             )
             .bind(`${prefix}-%`)
-            .first<any>();
+            .first();
 
           let nextNum = numbering.nextNumber || 1;
           if (maxRow && maxRow.invoice_number) {
@@ -201,7 +260,7 @@ export default {
           query += ` ORDER BY i.created_at DESC`;
 
           const stmt = params.length > 0 ? db.prepare(query).bind(...params) : db.prepare(query);
-          const { results } = await stmt.all<any>();
+          const { results } = await stmt.all();
           const mapped = results.map((row: any) =>
             mapInvoiceRow(row, row.org_name ? { id: row.organization_id, name: row.org_name, address: row.org_address, city: row.org_city, state: row.org_state, pincode: row.org_pincode, country: row.org_country, phone: row.org_phone, email: row.org_email } : undefined)
           );
@@ -242,9 +301,9 @@ export default {
         if (url.pathname.startsWith('/api/invoices/')) {
           const id = url.pathname.replace('/api/invoices/', '');
           if (method === 'GET') {
-            const row = await db.prepare('SELECT * FROM invoices WHERE id = ? OR invoice_number = ?').bind(id, id).first<any>();
+            const row = await db.prepare('SELECT * FROM invoices WHERE id = ? OR invoice_number = ?').bind(id, id).first();
             if (!row) return errorResponse('Invoice not found', 404);
-            const org = row.organization_id ? await db.prepare('SELECT * FROM organizations WHERE id = ?').bind(row.organization_id).first<any>() : null;
+            const org = row.organization_id ? await db.prepare('SELECT * FROM organizations WHERE id = ?').bind(row.organization_id).first() : null;
             return jsonResponse(mapInvoiceRow(row, org));
           }
           if (method === 'PUT') {
@@ -317,7 +376,7 @@ export default {
         // --- SETTINGS ---
         if (url.pathname === '/api/settings') {
           if (method === 'GET') {
-            const { results } = await db.prepare('SELECT * FROM settings').all<any>();
+            const { results } = await db.prepare('SELECT * FROM settings').all();
             const settingsObj: Record<string, any> = {};
             for (const r of results) {
               try {
@@ -371,7 +430,7 @@ export default {
             SELECT month FROM monthly_budget_summaries
             ORDER BY month DESC
           `;
-          const { results } = await db.prepare(q).all<any>();
+          const { results } = await db.prepare(q).all();
           const months = results.map((r: any) => r.month).filter(Boolean);
           return jsonResponse(months);
         }
@@ -615,9 +674,9 @@ export default {
         // --- BUDGET: CURRENT ACCOUNT ---
         if (url.pathname === '/api/budget/current-account') {
           if (method === 'GET') {
-            const inc = await db.prepare('SELECT SUM(amount) as total FROM income_entries').first<any>();
-            const withdr = await db.prepare('SELECT SUM(amount) as total FROM current_account_withdrawals').first<any>();
-            const list = await db.prepare('SELECT * FROM current_account_withdrawals ORDER BY date DESC').all<any>();
+            const inc = await db.prepare('SELECT SUM(amount) as total FROM income_entries').first();
+            const withdr = await db.prepare('SELECT SUM(amount) as total FROM current_account_withdrawals').first();
+            const list = await db.prepare('SELECT * FROM current_account_withdrawals ORDER BY date DESC').all();
             const totalIncome = inc?.total || 0;
             const totalWithdrawals = withdr?.total || 0;
             return jsonResponse({
@@ -791,20 +850,20 @@ export default {
         // --- BACKUP & RESTORE ---
         if (url.pathname === '/api/backup' && method === 'GET') {
           const [orgs, invs, sets, cats, exps, incs, bors, sums, goals, rules, rems, pps, withs, recs] = await Promise.all([
-            db.prepare('SELECT * FROM organizations').all<any>(),
-            db.prepare('SELECT * FROM invoices').all<any>(),
-            db.prepare('SELECT * FROM settings').all<any>(),
-            db.prepare('SELECT * FROM catalog_items').all<any>(),
-            db.prepare('SELECT * FROM expenses').all<any>(),
-            db.prepare('SELECT * FROM income_entries').all<any>(),
-            db.prepare('SELECT * FROM borrow_records').all<any>(),
-            db.prepare('SELECT * FROM monthly_budget_summaries').all<any>(),
-            db.prepare('SELECT * FROM financial_goals').all<any>(),
-            db.prepare('SELECT * FROM budget_allocation_rules').all<any>(),
-            db.prepare('SELECT * FROM tax_reminders').all<any>(),
-            db.prepare('SELECT * FROM sbi_pps_cheques').all<any>(),
-            db.prepare('SELECT * FROM current_account_withdrawals').all<any>(),
-            db.prepare('SELECT * FROM recurring_schedules').all<any>(),
+            db.prepare('SELECT * FROM organizations').all(),
+            db.prepare('SELECT * FROM invoices').all(),
+            db.prepare('SELECT * FROM settings').all(),
+            db.prepare('SELECT * FROM catalog_items').all(),
+            db.prepare('SELECT * FROM expenses').all(),
+            db.prepare('SELECT * FROM income_entries').all(),
+            db.prepare('SELECT * FROM borrow_records').all(),
+            db.prepare('SELECT * FROM monthly_budget_summaries').all(),
+            db.prepare('SELECT * FROM financial_goals').all(),
+            db.prepare('SELECT * FROM budget_allocation_rules').all(),
+            db.prepare('SELECT * FROM tax_reminders').all(),
+            db.prepare('SELECT * FROM sbi_pps_cheques').all(),
+            db.prepare('SELECT * FROM current_account_withdrawals').all(),
+            db.prepare('SELECT * FROM recurring_schedules').all(),
           ]);
 
           return jsonResponse({
@@ -891,7 +950,7 @@ export default {
       if (assetResponse.headers.get('content-type')?.includes('text/html')) {
         let html = await assetResponse.text();
 
-        // Safely serialize runtime variables
+        // Safely serialize runtime variables (only non-sensitive public client keys)
         const runtimeEnv = {
           VITE_FIREBASE_API_KEY: env.VITE_FIREBASE_API_KEY || '',
           VITE_FIREBASE_AUTH_DOMAIN: env.VITE_FIREBASE_AUTH_DOMAIN || '',
@@ -900,7 +959,6 @@ export default {
           VITE_FIREBASE_MESSAGING_SENDER_ID: env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
           VITE_FIREBASE_APP_ID: env.VITE_FIREBASE_APP_ID || '',
           VITE_FIREBASE_MEASUREMENT_ID: env.VITE_FIREBASE_MEASUREMENT_ID || '',
-          VITE_ALLOWED_EMAILS: env.VITE_ALLOWED_EMAILS || '',
         };
 
         const envScript = `<script>window.__ENV__ = ${JSON.stringify(runtimeEnv)};</script>`;

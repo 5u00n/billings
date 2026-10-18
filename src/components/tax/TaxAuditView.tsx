@@ -155,7 +155,7 @@ export const TaxAuditView: React.FC<TaxAuditViewProps> = ({ summary, expenses, o
           </div>
           <div className="text-[11px] text-slate-500 flex items-center gap-1 font-medium">
             <Info className="w-3.5 h-3.5" />
-            {summary?.violations.length || 0} compliance notice triggers detected
+            {summary?.violations?.length || 0} compliance notice triggers detected
           </div>
         </div>
 
@@ -269,18 +269,18 @@ export const TaxAuditView: React.FC<TaxAuditViewProps> = ({ summary, expenses, o
       </div>
 
       {/* Red-Flag Violations Warning Cards */}
-      {summary && summary.violations.length > 0 && (
+      {summary && (summary.violations || []).length > 0 && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h4 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
               <ShieldAlert className="w-4 h-4 text-rose-500" />
-              Statutory Red Flags & Audit Vulnerabilities ({summary.violations.length})
+              Statutory Red Flags & Audit Vulnerabilities ({(summary.violations || []).length})
             </h4>
             <span className="text-xs text-slate-500">Action recommended before ITR filing</span>
           </div>
 
           <div className="grid gap-3">
-            {summary.violations.map((v) => (
+            {(summary.violations || []).map((v) => (
               <div
                 key={v.id}
                 className={`p-4 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${

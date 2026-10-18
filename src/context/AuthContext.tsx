@@ -47,7 +47,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isConfigured, setIsConfigured] = useState(isFirebaseConfigured);
   const [error, setError] = useState<string | null>(null);
 
-  const verifyUserAuthorization = async (fbUser: FirebaseUser): Promise<boolean> => {
+  interface AuthVerifyResult {
+    authorized: boolean;
+    message?: string;
+  }
+
+  const verifyUserAuthorization = async (fbUser: FirebaseUser): Promise<AuthVerifyResult> => {
     try {
       const token = await fbUser.getIdToken();
       const res = await fetch('/api/auth/verify', {
@@ -55,13 +60,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           Authorization: `Bearer ${token}`,
         },
       });
+
       if (res.status === 403) {
-        return false;
+        try {
+          const data = await res.json();
+          if (data && data.error) {
+            return { authorized: false, message: data.error };
+          }
+        } catch {}
+        return {
+          authorized: false,
+          message: `Access restricted. Account '${fbUser.email || 'Unknown'}' is not an authorized administrator.`,
+        };
       }
-      return res.ok;
-    } catch (e) {
+
+      // If in local development and the endpoint returned 404 (e.g. standalone Vite dev without server)
+      if (res.status === 404 && typeof window !== 'undefined') {
+        const isLocalHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        if (isLocalHost) {
+          console.warn('/api/auth/verify endpoint returned 404; allowing local developer session.');
+          return { authorized: true };
+        }
+      }
+
+      if (res.ok) {
+        return { authorized: true };
+      }
+
+      return { authorized: false, message: 'Authorization check failed.' };
+    } catch (e: any) {
       console.warn('Auth verification network error, permitting if local dev:', e);
-      return true;
+      return { authorized: true };
     }
   };
 
@@ -85,12 +114,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         unsubscribe = onAuthStateChanged(currentAuth, async (fbUser) => {
           if (!isMounted) return;
           if (fbUser) {
-            const isAuthorized = await verifyUserAuthorization(fbUser);
+            const authResult = await verifyUserAuthorization(fbUser);
             if (!isMounted) return;
 
-            if (!isAuthorized) {
+            if (!authResult.authorized) {
               if (currentAuth) signOut(currentAuth);
-              setError('Access restricted. Your account is not authorized to access this console.');
+              setError(authResult.message || 'Access restricted. Your account is not authorized to access this console.');
               setUser(null);
               setFirebaseUser(null);
             } else {
@@ -130,10 +159,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setError(null);
     try {
       const result = await signInWithPopup(currentAuth, googleProvider);
-      const isAuthorized = await verifyUserAuthorization(result.user);
-      if (!isAuthorized) {
+      const authResult = await verifyUserAuthorization(result.user);
+      if (!authResult.authorized) {
         await signOut(currentAuth);
-        throw new Error('Access restricted. Your account is not authorized for this suite.');
+        throw new Error(authResult.message || 'Access restricted. Your account is not authorized for this suite.');
       }
     } catch (err: any) {
       console.error('Google sign in error:', err);
@@ -154,10 +183,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setError(null);
     try {
       const result = await signInWithEmailAndPassword(currentAuth, email, pass);
-      const isAuthorized = await verifyUserAuthorization(result.user);
-      if (!isAuthorized) {
+      const authResult = await verifyUserAuthorization(result.user);
+      if (!authResult.authorized) {
         await signOut(currentAuth);
-        throw new Error('Access restricted. Your account is not authorized.');
+        throw new Error(authResult.message || 'Access restricted. Your account is not authorized.');
       }
     } catch (err: any) {
       console.error('Email sign in error:', err);

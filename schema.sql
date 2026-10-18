@@ -188,6 +188,13 @@ VALUES (
   '{"name":"Suren Hembram","addressLine1":"Kanimahuli","addressLine2":"P.O. Bend , P.S. Chakulia","cityStateZip":"Chakulia Jharkhand 832301","country":"India","phone":"08987608678","email":"surenhembram97@gmail.com","website":"suren-site.vercel.app","udyamNumber":"UDYAM-JH-06-0090498-01-0004921","showUdyamOnBill":true,"bankName":"State Bank of India","accountType":"Current Account","accountNumber":"45661497562","ifscCode":"SBIN0014355","accountHolder":"Suren Hembram","upiId":"","customQrUrl":"","logoUrl":""}'
 );
 
+-- Seed default invoice numbering sequence if not exists
+INSERT OR IGNORE INTO settings (key, value_json)
+VALUES (
+  'numbering',
+  '{"billOfSupplyPrefix":"BOS","invoicePrefix":"INV","estimatePrefix":"EST","receiptPrefix":"REC","nextNumberBOS":1,"nextNumberINV":1,"nextNumberEST":1,"nextNumberREC":1}'
+);
+
 -- Seed statutory Indian tax compliance reminders
 INSERT OR IGNORE INTO tax_reminders (id, title, description, due_date, category, is_recurring, frequency, is_completed, notify_before_days, priority, penalty_note, action_url)
 VALUES

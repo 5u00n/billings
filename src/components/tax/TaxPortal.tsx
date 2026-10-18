@@ -27,9 +27,40 @@ interface TaxPortalProps {
   profile: UserProfile | null;
 }
 
+const DEFAULT_TAX_SUMMARY: TaxAuditSummary = {
+  financialYear: '2026-27 (FY)',
+  assessmentYear: '2027-28 (AY)',
+  grossTurnover: 0,
+  totalInvoicesCount: 0,
+  totalCollections: 0,
+  businessDeductibleExpenses: 0,
+  personalDrawings: 0,
+  mixedExpensesTotal: 0,
+  mixedExpensesDeductible: 0,
+  capitalAssetsTotal: 0,
+  capitalIntroduced: 0,
+  bankChargesDeductible: 0,
+  sbiMabRequired: 5000,
+  sbiMabStatus: 'COMPLIANT',
+  totalDeductionsAllowed: 0,
+  netActualProfit: 0,
+  profitMarginActual: 0,
+  presumptive44ADAProfit: 0,
+  presumptive44ADProfit: 0,
+  totalCashDeposits: 0,
+  totalCashWithdrawals: 0,
+  sftLimitCurrentAccount: 5000000,
+  sftCashUtilizationPercent: 0,
+  violations: [],
+  complianceScore: 100,
+  taxLiabilityNewRegime: 0,
+  taxLiabilityOldRegime: 0,
+  advanceTaxSchedule: [],
+};
+
 export const TaxPortal: React.FC<TaxPortalProps> = ({ profile }) => {
   const [activeTab, setActiveTab] = useState<TaxSubTab>('guide');
-  const [summary, setSummary] = useState<TaxAuditSummary | null>(null);
+  const [summary, setSummary] = useState<TaxAuditSummary>(DEFAULT_TAX_SUMMARY);
   const [reminders, setReminders] = useState<TaxReminder[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,22 +69,34 @@ export const TaxPortal: React.FC<TaxPortalProps> = ({ profile }) => {
     try {
       setLoading(true);
       const [sumRes, remRes, expRes] = await Promise.all([
-        fetch('/api/tax/summary'),
-        fetch('/api/tax/reminders'),
-        fetch('/api/budget/expenses'),
+        fetch('/api/tax/summary').catch(() => null),
+        fetch('/api/tax/reminders').catch(() => null),
+        fetch('/api/budget/expenses').catch(() => null),
       ]);
 
-      const [sumData, remData, expData] = await Promise.all([
-        sumRes.json(),
-        remRes.json(),
-        expRes.json(),
-      ]);
+      if (sumRes && sumRes.ok) {
+        const sumData = await sumRes.json();
+        if (sumData && !sumData.error && Array.isArray(sumData.violations)) {
+          setSummary(sumData);
+        } else {
+          setSummary(DEFAULT_TAX_SUMMARY);
+        }
+      } else {
+        setSummary(DEFAULT_TAX_SUMMARY);
+      }
 
-      setSummary(sumData);
-      setReminders(remData || []);
-      setExpenses(expData || []);
+      if (remRes && remRes.ok) {
+        const remData = await remRes.json();
+        setReminders(Array.isArray(remData) ? remData : []);
+      }
+
+      if (expRes && expRes.ok) {
+        const expData = await expRes.json();
+        setExpenses(Array.isArray(expData) ? expData : []);
+      }
     } catch (err) {
       console.error('Failed to load tax data:', err);
+      setSummary(DEFAULT_TAX_SUMMARY);
     } finally {
       setLoading(false);
     }
@@ -141,7 +184,7 @@ export const TaxPortal: React.FC<TaxPortalProps> = ({ profile }) => {
       <div className="flex items-center gap-2 overflow-x-auto pb-1 border-b border-slate-200 dark:border-slate-800">
         {[
           { id: 'guide', label: 'Tax Rules & Guide', icon: BookOpen },
-          { id: 'audit', label: 'Expense Classifier & Audit', icon: ShieldAlert, badge: summary?.violations.length ? `${summary.violations.length} alerts` : undefined },
+          { id: 'audit', label: 'Expense Classifier & Audit', icon: ShieldAlert, badge: summary?.violations?.length ? `${summary.violations.length} alerts` : undefined },
           { id: 'calculator', label: 'Tax & 44ADA Calculator', icon: Calculator },
           { id: 'reminders', label: 'Compliance Calendar & Alerts', icon: Bell, badge: reminders.filter(r => !r.is_completed).length || undefined },
           { id: 'dossier', label: 'CA Tax Dossier Export', icon: FileCheck },

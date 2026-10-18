@@ -12,9 +12,54 @@ interface SettingsProps {
   onRefresh: () => void;
 }
 
+const defaultProfile: UserProfile = {
+  name: 'Suren Hembram',
+  addressLine1: 'Kanimahuli',
+  addressLine2: 'P.O. Bend , P.S. Chakulia',
+  cityStateZip: 'Chakulia Jharkhand 832301',
+  country: 'India',
+  phone: '08987608678',
+  email: 'surenhembram97@gmail.com',
+  website: 'suren-site.vercel.app',
+  udyamNumber: 'UDYAM-JH-06-0090498-01-0004921',
+  showUdyamOnBill: true,
+  bankName: 'State Bank of India',
+  accountType: 'Current Account',
+  accountNumber: '45661497562',
+  ifscCode: 'SBIN0014355',
+  accountHolder: 'Suren Hembram',
+  upiId: '',
+  showBankDetailsOnBill: true,
+  showUpiOnBill: false,
+  showQrOnBill: false,
+  defaultHideQty: false,
+  defaultNotes: 'Thank you for your business.',
+  defaultTerms: 'Due on Receipt',
+  signatureText: 'Authorized Signatory',
+  logoUrl: '',
+  customQrUrl: '',
+};
+
+const defaultNumbering: NumberingSettings = {
+  billOfSupplyPrefix: 'BOS',
+  invoicePrefix: 'INV',
+  estimatePrefix: 'EST',
+  receiptPrefix: 'REC',
+  nextNumberBOS: 1,
+  nextNumberINV: 1,
+  nextNumberEST: 1,
+  nextNumberREC: 1,
+};
+
 export const Settings: React.FC<SettingsProps> = ({ settings, onSaveSettings, onRefresh }) => {
-  const [profile, setProfile] = useState<UserProfile>(settings.profile);
-  const [numbering, setNumbering] = useState<NumberingSettings>(settings.numbering);
+  const [profile, setProfile] = useState<UserProfile>(() => ({
+    ...defaultProfile,
+    ...(settings?.profile || {}),
+  }));
+  const [numbering, setNumbering] = useState<NumberingSettings>(() => ({
+    ...defaultNumbering,
+    ...(settings?.numbering || {}),
+  }));
   const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
 

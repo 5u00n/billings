@@ -163,11 +163,11 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
       ]);
 
       setSummary(sumData);
-      setExpenses(expData || []);
-      setIncomes(incData || []);
-      setBorrows(brData || []);
-      setGoals(goalData || []);
-      setAllocations(allocData?.allocations || []);
+      setExpenses(Array.isArray(expData) ? expData : []);
+      setIncomes(Array.isArray(incData) ? incData : []);
+      setBorrows(Array.isArray(brData) ? brData : []);
+      setGoals(Array.isArray(goalData) ? goalData : []);
+      setAllocations(Array.isArray(allocData?.allocations) ? allocData.allocations : []);
       setTotalIncomeBase(allocData?.total_income || 0);
 
       // Populate form fields

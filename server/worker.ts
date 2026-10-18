@@ -49,6 +49,81 @@ function errorResponse(message: string, status = 500): Response {
   return jsonResponse({ error: message }, status);
 }
 
+const DEFAULT_WORKER_PROFILE = {
+  name: 'Suren Hembram',
+  addressLine1: 'Kanimahuli',
+  addressLine2: 'P.O. Bend , P.S. Chakulia',
+  cityStateZip: 'Chakulia Jharkhand 832301',
+  country: 'India',
+  phone: '08987608678',
+  email: 'surenhembram97@gmail.com',
+  website: 'suren-site.vercel.app',
+  udyamNumber: 'UDYAM-JH-06-0090498-01-0004921',
+  showUdyamOnBill: true,
+  bankName: 'State Bank of India',
+  accountType: 'Current Account',
+  accountNumber: '45661497562',
+  ifscCode: 'SBIN0014355',
+  accountHolder: 'Suren Hembram',
+  upiId: '',
+  showBankDetailsOnBill: true,
+  showUpiOnBill: false,
+  showQrOnBill: false,
+  defaultHideQty: false,
+  defaultNotes: 'Thank you for your business.',
+  defaultTerms: 'Due on Receipt',
+  signatureText: 'Authorized Signatory',
+  logoUrl: '',
+  customQrUrl: '',
+};
+
+const DEFAULT_WORKER_NUMBERING = {
+  billOfSupplyPrefix: 'BOS',
+  invoicePrefix: 'INV',
+  estimatePrefix: 'EST',
+  receiptPrefix: 'REC',
+  nextNumberBOS: 1,
+  nextNumberINV: 1,
+  nextNumberEST: 1,
+  nextNumberREC: 1,
+};
+
+function calculateNewRegimeTax(taxableIncome: number): number {
+  if (taxableIncome <= 300000) return 0;
+  let tax = 0;
+  if (taxableIncome <= 700000) {
+    tax = (taxableIncome - 300000) * 0.05;
+  } else if (taxableIncome <= 1000000) {
+    tax = 20000 + (taxableIncome - 700000) * 0.10;
+  } else if (taxableIncome <= 1200000) {
+    tax = 50000 + (taxableIncome - 1000000) * 0.15;
+  } else if (taxableIncome <= 1500000) {
+    tax = 80000 + (taxableIncome - 1200000) * 0.20;
+  } else {
+    tax = 140000 + (taxableIncome - 1500000) * 0.30;
+  }
+  if (taxableIncome <= 700000) {
+    tax = 0;
+  }
+  return Math.round(tax * 1.04);
+}
+
+function calculateOldRegimeTax(taxableIncome: number): number {
+  if (taxableIncome <= 250000) return 0;
+  let tax = 0;
+  if (taxableIncome <= 500000) {
+    tax = (taxableIncome - 250000) * 0.05;
+  } else if (taxableIncome <= 1000000) {
+    tax = 12500 + (taxableIncome - 500000) * 0.20;
+  } else {
+    tax = 112500 + (taxableIncome - 1000000) * 0.30;
+  }
+  if (taxableIncome <= 500000) {
+    tax = 0;
+  }
+  return Math.round(tax * 1.04);
+}
+
 function mapInvoiceRow(row: any, orgRow?: any) {
   return {
     id: row.id,
@@ -377,7 +452,10 @@ export default {
         if (url.pathname === '/api/settings') {
           if (method === 'GET') {
             const { results } = await db.prepare('SELECT * FROM settings').all();
-            const settingsObj: Record<string, any> = {};
+            const settingsObj: Record<string, any> = {
+              profile: DEFAULT_WORKER_PROFILE,
+              numbering: DEFAULT_WORKER_NUMBERING,
+            };
             for (const r of results) {
               try {
                 settingsObj[r.key] = JSON.parse(r.value_json);
@@ -385,9 +463,11 @@ export default {
                 settingsObj[r.key] = r.value_json;
               }
             }
+            settingsObj.profile = { ...DEFAULT_WORKER_PROFILE, ...(settingsObj.profile || {}) };
+            settingsObj.numbering = { ...DEFAULT_WORKER_NUMBERING, ...(settingsObj.numbering || {}) };
             return jsonResponse(settingsObj);
           }
-          if (method === 'POST') {
+          if (method === 'POST' || method === 'PUT') {
             const b = (await request.json()) as any;
             const stmts = Object.entries(b).map(([k, v]) =>
               db.prepare('INSERT INTO settings (key, value_json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json')
@@ -539,7 +619,10 @@ export default {
             return jsonResponse({ success: true });
           }
           if (method === 'DELETE') {
-            await db.prepare('DELETE FROM income_entries WHERE id = ?').bind(id).run();
+            await db.batch([
+              db.prepare('DELETE FROM current_account_withdrawals WHERE income_entry_id = ?').bind(id),
+              db.prepare('DELETE FROM income_entries WHERE id = ?').bind(id),
+            ]);
             return jsonResponse({ success: true });
           }
         }
@@ -674,31 +757,147 @@ export default {
         // --- BUDGET: CURRENT ACCOUNT ---
         if (url.pathname === '/api/budget/current-account') {
           if (method === 'GET') {
-            const inc = await db.prepare('SELECT SUM(amount) as total FROM income_entries').first();
-            const withdr = await db.prepare('SELECT SUM(amount) as total FROM current_account_withdrawals').first();
-            const list = await db.prepare('SELECT * FROM current_account_withdrawals ORDER BY date DESC').all();
-            const totalIncome = inc?.total || 0;
-            const totalWithdrawals = withdr?.total || 0;
+            const { results: invoices } = await db.prepare(`
+              SELECT i.*, o.name as org_name
+              FROM invoices i
+              LEFT JOIN organizations o ON i.organization_id = o.id
+              ORDER BY i.invoice_date DESC, i.created_at DESC
+            `).all();
+
+            let totalRevenuePaid = 0;
+            let unpaidReceivables = 0;
+
+            const paidInvoices: any[] = [];
+            const unpaidInvoices: any[] = [];
+
+            for (const inv of ((invoices as any[]) || [])) {
+              const isStatusPaid = (inv.status || '').toUpperCase() === 'PAID';
+              const amtPaid = Number(inv.amount_paid) || 0;
+              const totalAmt = Number(inv.total) || 0;
+              const effectivePaid = isStatusPaid ? (amtPaid > 0 ? amtPaid : totalAmt) : amtPaid;
+              const balanceDue = isStatusPaid ? 0 : (Number(inv.balance_due) > 0 ? Number(inv.balance_due) : Math.max(0, totalAmt - effectivePaid));
+
+              if (effectivePaid > 0) {
+                totalRevenuePaid += effectivePaid;
+                paidInvoices.push({
+                  id: inv.id,
+                  invoice_number: inv.invoice_number,
+                  date: inv.invoice_date,
+                  org_name: inv.org_name || 'Client',
+                  amount_paid: effectivePaid,
+                  total: totalAmt,
+                  status: inv.status,
+                });
+              }
+
+              if (balanceDue > 0) {
+                unpaidReceivables += balanceDue;
+                unpaidInvoices.push({
+                  id: inv.id,
+                  invoice_number: inv.invoice_number,
+                  date: inv.invoice_date,
+                  org_name: inv.org_name || 'Client',
+                  balance_due: balanceDue,
+                  total: totalAmt,
+                  status: inv.status,
+                });
+              }
+            }
+
+            const { results: withdrawals } = await db.prepare(`
+              SELECT * FROM current_account_withdrawals
+              ORDER BY date DESC, created_at DESC
+            `).all();
+
+            const totalWithdrawn = ((withdrawals as any[]) || []).reduce((sum: number, w: any) => sum + (Number(w.amount) || 0), 0);
+            const availableBalance = Math.max(0, totalRevenuePaid - totalWithdrawn);
+
             return jsonResponse({
-              totalIncome,
-              totalWithdrawals,
-              currentBalance: totalIncome - totalWithdrawals,
-              withdrawals: list.results,
+              total_revenue_paid: totalRevenuePaid,
+              total_withdrawn: totalWithdrawn,
+              available_balance: availableBalance,
+              unpaid_receivables: unpaidReceivables,
+              paid_invoices: paidInvoices,
+              unpaid_invoices: unpaidInvoices,
+              withdrawals: withdrawals || [],
+              totalIncome: totalRevenuePaid,
+              totalWithdrawals: totalWithdrawn,
+              currentBalance: availableBalance,
             });
           }
         }
 
         if (url.pathname === '/api/budget/current-account/withdraw' && method === 'POST') {
           const b = (await request.json()) as any;
-          const id = b.id || crypto.randomUUID();
-          await db.prepare('INSERT INTO current_account_withdrawals (id, date, month, amount, notes, income_entry_id) VALUES (?, ?, ?, ?, ?, ?)')
-            .bind(id, b.date, b.month || b.date.slice(0, 7), b.amount, b.notes || '', b.income_entry_id || null).run();
-          return jsonResponse({ id, success: true }, 201);
+          const numAmount = Number(b.amount);
+          if (!numAmount || numAmount <= 0) {
+            return jsonResponse({ error: 'Withdrawal amount must be greater than ₹0.' }, 400);
+          }
+
+          const withdrawDate = b.date || new Date().toISOString().substring(0, 10);
+          const withdrawMonth = withdrawDate.substring(0, 7);
+
+          // Calculate available balance
+          const { results: invoices } = await db.prepare('SELECT status, amount_paid, total FROM invoices').all();
+          let totalRevenuePaid = 0;
+          for (const inv of ((invoices as any[]) || [])) {
+            const isStatusPaid = (inv.status || '').toUpperCase() === 'PAID';
+            const amtPaid = Number(inv.amount_paid) || 0;
+            const totalAmt = Number(inv.total) || 0;
+            const effectivePaid = isStatusPaid ? (amtPaid > 0 ? amtPaid : totalAmt) : amtPaid;
+            totalRevenuePaid += effectivePaid;
+          }
+
+          const withdrRow = await db.prepare('SELECT SUM(amount) as sum FROM current_account_withdrawals').first();
+          const currentTotalWithdrawn = Number((withdrRow as any)?.sum) || 0;
+          const availableBalance = Math.max(0, totalRevenuePaid - currentTotalWithdrawn);
+
+          if (numAmount > availableBalance) {
+            return jsonResponse({
+              error: `Cannot withdraw ₹${numAmount.toLocaleString('en-IN')}. Current Account available balance is ₹${availableBalance.toLocaleString('en-IN')}. Unpaid invoices cannot be withdrawn.`,
+            }, 400);
+          }
+
+          const withdrawalId = b.id || `with-${Date.now()}`;
+          const incomeId = `inc-with-${Date.now()}`;
+          const incomeSource = b.source?.trim() || 'Current Account (Owner Draw)';
+          const withdrawalNotes = b.notes?.trim() || 'Owner draw from Current Account to freelance income';
+
+          await db.batch([
+            db.prepare(`
+              INSERT INTO current_account_withdrawals (id, date, month, amount, notes, income_entry_id)
+              VALUES (?, ?, ?, ?, ?, ?)
+            `).bind(withdrawalId, withdrawDate, withdrawMonth, numAmount, withdrawalNotes, incomeId),
+            db.prepare(`
+              INSERT INTO income_entries (id, date, month, category, source, amount, notes)
+              VALUES (?, ?, ?, 'fl', ?, ?, ?)
+            `).bind(incomeId, withdrawDate, withdrawMonth, incomeSource, numAmount, withdrawalNotes),
+          ]);
+
+          return jsonResponse({
+            success: true,
+            withdrawalId,
+            incomeId,
+            amount: numAmount,
+            available_balance: availableBalance - numAmount,
+          }, 201);
         }
 
         if (url.pathname.startsWith('/api/budget/current-account/withdraw/') && method === 'DELETE') {
           const id = url.pathname.replace('/api/budget/current-account/withdraw/', '');
-          await db.prepare('DELETE FROM current_account_withdrawals WHERE id = ?').bind(id).run();
+          const row = await db.prepare('SELECT * FROM current_account_withdrawals WHERE id = ?').bind(id).first();
+          if (!row) {
+            return jsonResponse({ error: 'Withdrawal record not found.' }, 404);
+          }
+          const batch = [
+            db.prepare('DELETE FROM current_account_withdrawals WHERE id = ?').bind(id),
+          ];
+          if ((row as any).income_entry_id) {
+            batch.push(
+              db.prepare('DELETE FROM income_entries WHERE id = ?').bind((row as any).income_entry_id)
+            );
+          }
+          await db.batch(batch);
           return jsonResponse({ success: true });
         }
 
@@ -750,6 +949,414 @@ export default {
             await db.prepare('DELETE FROM tax_reminders WHERE id = ?').bind(id).run();
             return jsonResponse({ success: true });
           }
+        }
+
+        // --- TAX SUMMARY ---
+        if (url.pathname === '/api/tax/summary' && method === 'GET') {
+          // 1. Turnover from Invoices & Income
+          const invStats: any = await db.prepare(`
+            SELECT 
+              COALESCE(SUM(total), 0) as gross_turnover,
+              COALESCE(SUM(amount_paid), 0) as total_collections,
+              COUNT(*) as invoices_count
+            FROM invoices 
+            WHERE status != 'cancelled'
+          `).first();
+
+          const incStats: any = await db.prepare(`
+            SELECT COALESCE(SUM(amount), 0) as total_income
+            FROM income_entries
+            WHERE category IN ('fl', 'sal', 'ext')
+          `).first();
+
+          const grossTurnover = Math.max(invStats?.gross_turnover || 0, incStats?.total_income || 0);
+          const totalCollections = invStats?.total_collections || 0;
+          const totalInvoicesCount = invStats?.invoices_count || 0;
+
+          // 2. Expenses breakdown
+          const { results: expenses } = await db.prepare('SELECT * FROM expenses').all();
+
+          let businessDeductibleExpenses = 0;
+          let personalDrawings = 0;
+          let mixedExpensesTotal = 0;
+          let mixedExpensesDeductible = 0;
+          let capitalAssetsTotal = 0;
+          let capitalIntroduced = 0;
+          let bankChargesDeductible = 0;
+          let totalCashWithdrawals = 0;
+
+          const violations: any[] = [];
+
+          (expenses || []).forEach((e: any) => {
+            const amt = Number(e.amount) || 0;
+            const isCash = (e.payment_method || '').toLowerCase().includes('cash');
+
+            if (isCash) {
+              totalCashWithdrawals += amt;
+            }
+
+            // Check Section 40A(3) Cash Disallowance (> ₹10,000 cash in a single payment)
+            if (isCash && amt > 10000 && e.tax_classification === 'BUSINESS_DEDUCTIBLE') {
+              violations.push({
+                id: `viol-40a3-${e.id}`,
+                date: e.date,
+                description: e.description,
+                amount: amt,
+                ruleCode: 'SEC_40A3',
+                ruleTitle: 'Section 40A(3) Cash Payment Limit Violation',
+                severity: 'DANGER',
+                suggestion: `Payment of ₹${amt.toLocaleString('en-IN')} was made in cash exceeding the statutory ₹10,000 threshold. Under Income Tax Section 40A(3), this entire expense is 100% disallowed from business deductions. Switch to UPI, NEFT, or account payee cheque.`,
+              });
+            }
+
+            // Check Section 17(5) Blocked ITC
+            const isBlockedTag = ['Food', 'Dining', 'Personal', 'Fuel', 'Cosmetics', 'Entertainment'].includes(e.tag);
+            if (Boolean(e.gst_itc_eligible) && isBlockedTag) {
+              violations.push({
+                id: `viol-17-5-${e.id}`,
+                date: e.date,
+                description: e.description,
+                amount: amt,
+                ruleCode: 'SEC_17_5',
+                ruleTitle: 'Section 17(5) Blocked Input Tax Credit (ITC)',
+                severity: 'DANGER',
+                suggestion: `Input Tax Credit claimed on "${e.tag || e.description}". Section 17(5) of CGST Act strictly blocks ITC on food, catering, motor fuel, club memberships, and personal goods. Claiming this invites GST audit notices.`,
+              });
+            }
+
+            // Check Drawings misclassified as Business Expense
+            if (['Food', 'Groceries', 'Cosmetics', 'Personal', 'Shopping'].includes(e.tag) && e.tax_classification === 'BUSINESS_DEDUCTIBLE') {
+              violations.push({
+                id: `viol-draw-${e.id}`,
+                date: e.date,
+                description: e.description,
+                amount: amt,
+                ruleCode: 'DRAWINGS_AS_EXPENSE',
+                ruleTitle: 'Personal Drawings Claimed as Business Expense',
+                severity: 'WARNING',
+                suggestion: `"${e.description}" appears to be a personal lifestyle expense. Claiming personal spending as business deduction violates Section 37(1) (Wholly & Exclusively rule) and invites Section 270A penalties (up to 200% of tax evaded). Reclassify as "Personal Drawings".`,
+              });
+            }
+
+            // Check Missing Voucher on larger business expenses
+            if (amt >= 2000 && !e.has_invoice_voucher && e.tax_classification === 'BUSINESS_DEDUCTIBLE') {
+              violations.push({
+                id: `viol-vouch-${e.id}`,
+                date: e.date,
+                description: e.description,
+                amount: amt,
+                ruleCode: 'MISSING_VOUCHER',
+                ruleTitle: 'Missing Tax Invoice / Proof Voucher',
+                severity: 'WARNING',
+                suggestion: `Business deduction of ₹${amt.toLocaleString('en-IN')} lacks a supporting invoice/voucher. In case of scrutiny under Section 143(3), unvouched expenses are routinely disallowed.`,
+              });
+            }
+
+            // Calculate totals based on classification
+            if (e.tax_classification === 'BUSINESS_DEDUCTIBLE') {
+              businessDeductibleExpenses += amt;
+              const desc = (e.description || '').toLowerCase();
+              const tag = (e.tag || '').toLowerCase();
+              if (['bank', 'sbi', 'mab', 'charge', 'fee', 'amc', 'sms'].some((k) => desc.includes(k) || tag.includes(k))) {
+                bankChargesDeductible += amt;
+              }
+            } else if (e.tax_classification === 'PERSONAL_DRAWINGS') {
+              personalDrawings += amt;
+            } else if (e.tax_classification === 'CAPITAL_INTRODUCED') {
+              capitalIntroduced += amt;
+            } else if (e.tax_classification === 'MIXED_APPORTIONED') {
+              mixedExpensesTotal += amt;
+              const busPct = e.business_percentage !== undefined ? Number(e.business_percentage) : 70;
+              const deductiblePart = (amt * busPct) / 100;
+              mixedExpensesDeductible += deductiblePart;
+              personalDrawings += (amt - deductiblePart);
+            } else if (e.tax_classification === 'CAPITAL_ASSET') {
+              capitalAssetsTotal += amt;
+            } else {
+              businessDeductibleExpenses += amt;
+            }
+          });
+
+          // 40% depreciation allowed on IT equipment / computers under Section 32
+          const capitalAssetDepreciation = capitalAssetsTotal * 0.40;
+          const totalDeductionsAllowed = Math.round(businessDeductibleExpenses + mixedExpensesDeductible + capitalAssetDepreciation);
+          const netActualProfit = Math.max(0, grossTurnover - totalDeductionsAllowed);
+          const profitMarginActual = grossTurnover > 0 ? Math.round((netActualProfit / grossTurnover) * 100) : 0;
+
+          // Presumptive Profit Calculations
+          const presumptive44ADAProfit = Math.round(grossTurnover * 0.50);
+          const presumptive44ADProfit = Math.round(grossTurnover * 0.06);
+
+          // SFT Cash Limits
+          const cashIncomeRow: any = await db.prepare("SELECT COALESCE(SUM(amount), 0) as cash_in FROM income_entries WHERE notes LIKE '%cash%' OR source LIKE '%cash%'").first();
+          const totalCashDeposits = cashIncomeRow?.cash_in || 0;
+          const sftLimitCurrentAccount = 5000000;
+          const sftCashUtilizationPercent = Math.min(100, Math.round(((totalCashDeposits + totalCashWithdrawals) / sftLimitCurrentAccount) * 100));
+
+          if ((totalCashDeposits + totalCashWithdrawals) > 1000000) {
+            violations.push({
+              id: 'viol-sft-threshold',
+              date: new Date().toISOString().split('T')[0],
+              description: `Aggregate cash turnover: ₹${(totalCashDeposits + totalCashWithdrawals).toLocaleString('en-IN')}`,
+              amount: totalCashDeposits + totalCashWithdrawals,
+              ruleCode: 'SFT_CASH',
+              ruleTitle: 'High Cash Velocity in Current Account',
+              severity: (totalCashDeposits + totalCashWithdrawals) >= 4000000 ? 'DANGER' : 'WARNING',
+              suggestion: `Your SBI Current Account cash volume is tracked by the IT Department's AIS (Annual Information Statement). Aggregate cash deposits/withdrawals exceeding ₹50,00,000 are mandatorily reported under SFT-005. Maintain strict digital payment hygiene.`,
+            });
+          }
+
+          let score = 100;
+          violations.forEach((v) => {
+            if (v.severity === 'DANGER') score -= 15;
+            else score -= 8;
+          });
+          const complianceScore = Math.max(25, Math.min(100, score));
+
+          const taxableBase = presumptive44ADAProfit > 0 ? presumptive44ADAProfit : netActualProfit;
+          const taxLiabilityNewRegime = calculateNewRegimeTax(taxableBase);
+          const taxLiabilityOldRegime = calculateOldRegimeTax(taxableBase);
+
+          const taxToPay = taxLiabilityNewRegime;
+          const advanceTaxSchedule = [
+            {
+              quarter: 'Q1 (15%)',
+              dueDate: '15 June',
+              percentage: 15,
+              amountDue: Math.round(taxToPay * 0.15),
+              status: 'PAID' as const,
+              description: 'First installment under Section 208/211 (Exempt if opting for Section 44ADA)',
+            },
+            {
+              quarter: 'Q2 (45%)',
+              dueDate: '15 September',
+              percentage: 45,
+              amountDue: Math.round(taxToPay * 0.45),
+              status: 'PAID' as const,
+              description: 'Cumulative 45% of estimated annual tax liability',
+            },
+            {
+              quarter: 'Q3 (75%)',
+              dueDate: '15 December',
+              percentage: 75,
+              amountDue: Math.round(taxToPay * 0.75),
+              status: 'UPCOMING' as const,
+              description: 'Cumulative 75% of estimated tax liability',
+            },
+            {
+              quarter: 'Q4 (100% / 44ADA)',
+              dueDate: '15 March',
+              percentage: 100,
+              amountDue: taxToPay,
+              status: 'UPCOMING' as const,
+              description: 'Full 100% tax liability due. Single installment deadline for Section 44ADA / 44AD filers!',
+            },
+          ];
+
+          return jsonResponse({
+            financialYear: '2026-27 (FY)',
+            assessmentYear: '2027-28 (AY)',
+            grossTurnover,
+            totalInvoicesCount,
+            totalCollections,
+            businessDeductibleExpenses,
+            personalDrawings,
+            mixedExpensesTotal,
+            mixedExpensesDeductible,
+            capitalAssetsTotal,
+            capitalIntroduced,
+            bankChargesDeductible,
+            sbiMabRequired: 5000,
+            sbiMabStatus: 'COMPLIANT' as const,
+            totalDeductionsAllowed,
+            netActualProfit,
+            profitMarginActual,
+            presumptive44ADAProfit,
+            presumptive44ADProfit,
+            totalCashDeposits,
+            totalCashWithdrawals,
+            sftLimitCurrentAccount,
+            sftCashUtilizationPercent,
+            violations,
+            complianceScore,
+            taxLiabilityNewRegime,
+            taxLiabilityOldRegime,
+            advanceTaxSchedule,
+          });
+        }
+
+        // Single expense classify endpoint
+        if (url.pathname.startsWith('/api/tax/expenses/') && url.pathname.endsWith('/classify') && method === 'POST') {
+          const id = url.pathname.replace('/api/tax/expenses/', '').replace('/classify', '');
+          const b = (await request.json()) as any;
+          await db.prepare(`
+            UPDATE expenses SET
+              tax_classification = COALESCE(?, tax_classification),
+              business_percentage = COALESCE(?, business_percentage),
+              gst_rate = COALESCE(?, gst_rate),
+              gst_itc_eligible = COALESCE(?, gst_itc_eligible),
+              has_invoice_voucher = COALESCE(?, has_invoice_voucher),
+              voucher_ref = COALESCE(?, voucher_ref)
+            WHERE id = ?
+          `).bind(
+            b.tax_classification,
+            b.business_percentage !== undefined ? Number(b.business_percentage) : null,
+            b.gst_rate !== undefined ? Number(b.gst_rate) : null,
+            b.gst_itc_eligible !== undefined ? (b.gst_itc_eligible ? 1 : 0) : null,
+            b.has_invoice_voucher !== undefined ? (b.has_invoice_voucher ? 1 : 0) : null,
+            b.voucher_ref !== undefined ? b.voucher_ref : null,
+            id
+          ).run();
+          return jsonResponse({ success: true });
+        }
+
+        // Bulk auto-classify expenses based on intelligent heuristics
+        if (url.pathname === '/api/tax/expenses/auto-classify' && method === 'POST') {
+          const { results: expenses } = await db.prepare('SELECT id, tag, description, payment_method, amount FROM expenses').all();
+          let updatedCount = 0;
+          const stmts: D1PreparedStatement[] = [];
+
+          (expenses || []).forEach((e: any) => {
+            let classification = 'BUSINESS_DEDUCTIBLE';
+            let busPct = 100;
+            let itcEligible = 0;
+
+            const desc = (e.description || '').toLowerCase();
+            const tag = (e.tag || '').toLowerCase();
+
+            if (['capital', 'funds transfer', 'savings to current', 'owner equity', 'self transfer', 'personal savings'].some(k => tag.includes(k) || desc.includes(k))) {
+              classification = 'CAPITAL_INTRODUCED';
+              busPct = 0;
+              itcEligible = 0;
+            } else if (['bank charge', 'sbi fee', 'mab', 'sms alert', 'debit card amc', 'cheque'].some(k => tag.includes(k) || desc.includes(k))) {
+              classification = 'BUSINESS_DEDUCTIBLE';
+              busPct = 100;
+              itcEligible = 0;
+            } else if (['food', 'dining', 'groceries', 'cinema', 'personal', 'cosmetics', 'shopping', 'medicine'].some(k => tag.includes(k) || desc.includes(k))) {
+              classification = 'PERSONAL_DRAWINGS';
+              busPct = 0;
+              itcEligible = 0;
+            } else if (['fuel', 'travel', 'recharge', 'internet', 'mobile', 'broadband', 'wifi'].some(k => tag.includes(k) || desc.includes(k))) {
+              classification = 'MIXED_APPORTIONED';
+              busPct = 70;
+              itcEligible = 0;
+            } else if (['gadget', 'laptop', 'hardware', 'equipment', 'phone', 'computer'].some(k => tag.includes(k) || desc.includes(k))) {
+              classification = 'CAPITAL_ASSET';
+              busPct = 100;
+              itcEligible = 1;
+            } else {
+              classification = 'BUSINESS_DEDUCTIBLE';
+              busPct = 100;
+              itcEligible = 1;
+            }
+
+            stmts.push(
+              db.prepare('UPDATE expenses SET tax_classification = ?, business_percentage = ?, gst_itc_eligible = ? WHERE id = ?')
+                .bind(classification, busPct, itcEligible, e.id)
+            );
+            updatedCount++;
+          });
+
+          if (stmts.length > 0) {
+            await db.batch(stmts);
+          }
+          return jsonResponse({ success: true, count: updatedCount });
+        }
+
+        // Quick-Log SBI Bank Charges (100% Tax Deductible u/s 37(1))
+        if (url.pathname === '/api/tax/sbi/quick-bank-charge' && method === 'POST') {
+          const b = (await request.json()) as any;
+          const { chargeType, customAmount, notes } = b;
+
+          let desc = 'SBI Bank Service Charges';
+          let amt = 0;
+
+          switch (chargeType) {
+            case 'DEBIT_CARD_AMC':
+              desc = 'SBI Pride Business Debit Card AMC (₹350 + 18% GST)';
+              amt = customAmount ? Number(customAmount) : 413;
+              break;
+            case 'SMS_ALERT':
+              desc = 'SBI Current Account Quarterly SMS Alert Fee (₹15 + 18% GST)';
+              amt = customAmount ? Number(customAmount) : 17.70;
+              break;
+            case 'MAB_SHORTFALL':
+              desc = 'SBI Semi-Urban MAB Non-Maintenance Fee (₹500 + 18% GST)';
+              amt = customAmount ? Number(customAmount) : 590;
+              break;
+            case 'CHEQUE_BOOK':
+              desc = 'SBI Current Account Cheque Book Charges (25 Leaves + GST)';
+              amt = customAmount ? Number(customAmount) : 177;
+              break;
+            default:
+              desc = notes || 'SBI Current Account Charges u/s 37(1)';
+              amt = Number(customAmount || 100);
+              break;
+          }
+
+          const today = new Date().toISOString().slice(0, 10);
+          const month = today.slice(0, 7);
+          const id = `exp-sbi-${Date.now()}`;
+
+          await db.prepare(`
+            INSERT INTO expenses (
+              id, date, month, category, tag, description, amount, payment_method,
+              tax_classification, business_percentage, gst_rate, gst_itc_eligible,
+              has_invoice_voucher, voucher_ref, notes
+            ) VALUES (?, ?, ?, 'reg', 'Bank Charges', ?, ?, 'SBI Current Account', 'BUSINESS_DEDUCTIBLE', 100, 18, 0, 1, 'SBI-CHAKULIA-DEBIT', ?)
+          `).bind(id, today, month, desc, amt, notes || 'Auto-logged SBI statutory bank charges - 100% deductible under Section 37(1)').run();
+
+          return jsonResponse({ success: true, id, description: desc, amount: amt });
+        }
+
+        // Batch Import SBI Statement Items (Expenses & Capital Introduced)
+        if (url.pathname === '/api/tax/sbi/batch-import' && method === 'POST') {
+          const b = (await request.json()) as any;
+          const { transactions } = b;
+          if (!Array.isArray(transactions) || transactions.length === 0) {
+            return errorResponse('transactions array is required', 400);
+          }
+
+          let importedExpenses = 0;
+          let importedIncomes = 0;
+          const stmts: D1PreparedStatement[] = [];
+
+          for (const item of transactions) {
+            const date = item.date || new Date().toISOString().slice(0, 10);
+            const month = date.slice(0, 7);
+            const amt = Number(item.amount) || 0;
+            if (amt <= 0) continue;
+
+            const isCredit = (item.type || '').toUpperCase() === 'CREDIT' || (item.cr_dr || '').toUpperCase() === 'CR';
+            const desc = (item.description || item.narration || 'SBI Bank Transaction').trim();
+            const id = `sbi-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+
+            if (isCredit) {
+              stmts.push(
+                db.prepare(`
+                  INSERT INTO income_entries (id, date, month, category, source, amount, notes)
+                  VALUES (?, ?, ?, 'ext', 'SBI Bank Transfer', ?, ?)
+                `).bind(id, date, month, amt, `Auto-imported SBI credit: ${desc}`)
+              );
+              importedIncomes++;
+            } else {
+              stmts.push(
+                db.prepare(`
+                  INSERT INTO expenses (
+                    id, date, month, category, tag, description, amount, payment_method,
+                    tax_classification, business_percentage, gst_rate, gst_itc_eligible,
+                    has_invoice_voucher, voucher_ref, notes
+                  ) VALUES (?, ?, ?, 'reg', 'Bank Statement', ?, ?, 'SBI Current Account', 'BUSINESS_DEDUCTIBLE', 100, 0, 0, 1, 'SBI-IMPORT', ?)
+                `).bind(id, date, month, desc, amt, `Auto-imported SBI debit: ${desc}`)
+              );
+              importedExpenses++;
+            }
+          }
+
+          if (stmts.length > 0) {
+            await db.batch(stmts);
+          }
+          return jsonResponse({ success: true, importedExpenses, importedIncomes });
         }
 
         // --- SBI PPS CHEQUES ---

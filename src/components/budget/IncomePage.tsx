@@ -42,10 +42,15 @@ export const IncomePage: React.FC = () => {
     try {
       setLoading(true);
       const res = await fetch(`/api/budget/income?month=${m}`);
+      if (!res.ok) {
+        setIncomes([]);
+        return;
+      }
       const data = await res.json();
-      setIncomes(data || []);
+      setIncomes(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to load income:', err);
+      setIncomes([]);
     } finally {
       setLoading(false);
     }

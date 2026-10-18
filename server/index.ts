@@ -7,8 +7,83 @@ import { generateDocxBuffer } from './docxGenerator';
 import { generateVectorPdfBuffer } from './pdfGenerator';
 import { Invoice, Organization, UserProfile, NumberingSettings, CatalogItem } from '../src/types';
 
+// Automatically load .env.local and .env into process.env if present
+function loadEnvFile(filePath: string) {
+  if (fs.existsSync(filePath)) {
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx !== -1) {
+          const key = trimmed.slice(0, eqIdx).trim();
+          const val = trimmed.slice(eqIdx + 1).trim();
+          if (!process.env[key]) {
+            process.env[key] = val;
+          }
+        }
+      }
+    } catch {}
+  }
+}
+loadEnvFile(path.resolve(process.cwd(), '.env.local'));
+loadEnvFile(path.resolve(process.cwd(), '.env'));
+
 const app = express();
 const PORT = process.env.PORT || 5001;
+
+export const DEFAULT_PROFILE: UserProfile = {
+  name: 'Suren Hembram',
+  addressLine1: 'Kanimahuli',
+  addressLine2: 'P.O. Bend , P.S. Chakulia',
+  cityStateZip: 'Chakulia Jharkhand 832301',
+  country: 'India',
+  phone: '08987608678',
+  email: 'surenhembram97@gmail.com',
+  website: 'suren-site.vercel.app',
+  udyamNumber: 'UDYAM-JH-06-0090498-01-0004921',
+  showUdyamOnBill: true,
+  bankName: 'State Bank of India',
+  accountType: 'Current Account',
+  accountNumber: '45661497562',
+  ifscCode: 'SBIN0014355',
+  accountHolder: 'Suren Hembram',
+  upiId: '',
+  showBankDetailsOnBill: true,
+  showUpiOnBill: false,
+  showQrOnBill: false,
+  defaultHideQty: false,
+  defaultNotes: 'Thank you for your business.',
+  defaultTerms: 'Due on Receipt',
+  signatureText: 'Authorized Signatory',
+  logoUrl: '',
+  customQrUrl: '',
+};
+
+export const DEFAULT_NUMBERING: NumberingSettings = {
+  billOfSupplyPrefix: 'BOS',
+  invoicePrefix: 'INV',
+  estimatePrefix: 'EST',
+  receiptPrefix: 'REC',
+  nextNumberBOS: 1,
+  nextNumberINV: 1,
+  nextNumberEST: 1,
+  nextNumberREC: 1,
+};
+
+function parseJwtPayload(token: string) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = Buffer.from(base64, 'base64').toString('utf8');
+    return JSON.parse(jsonPayload);
+  } catch {
+    return null;
+  }
+}
 
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',
@@ -40,6 +115,65 @@ app.use((_req, res, next) => {
 });
 
 app.use(express.json({ limit: '15mb' }));
+
+// ----------------- PUBLIC RUNTIME CONFIG & AUTH -----------------
+
+app.get('/api/config', (_req: Request, res: Response) => {
+  res.json({
+    VITE_FIREBASE_API_KEY: process.env.VITE_FIREBASE_API_KEY || '',
+    VITE_FIREBASE_AUTH_DOMAIN: process.env.VITE_FIREBASE_AUTH_DOMAIN || '',
+    VITE_FIREBASE_PROJECT_ID: process.env.VITE_FIREBASE_PROJECT_ID || '',
+    VITE_FIREBASE_STORAGE_BUCKET: process.env.VITE_FIREBASE_STORAGE_BUCKET || '',
+    VITE_FIREBASE_MESSAGING_SENDER_ID: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
+    VITE_FIREBASE_APP_ID: process.env.VITE_FIREBASE_APP_ID || '',
+  });
+});
+
+app.get('/api/health', (_req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    platform: 'express-local',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get('/api/auth/verify', (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization || '';
+  if (!authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Authentication required. Missing Authorization header.' });
+  }
+
+  const token = authHeader.slice(7).trim();
+  const payload = parseJwtPayload(token);
+  if (!payload || typeof payload !== 'object') {
+    return res.status(401).json({ error: 'Invalid or malformed authentication token.' });
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  if (payload.exp && payload.exp < now) {
+    return res.status(401).json({ error: 'Session expired. Please sign in again.' });
+  }
+
+  const allowedList = (process.env.VITE_ALLOWED_EMAILS || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+
+  const email = (payload.email || '').toLowerCase();
+  if (allowedList.length > 0) {
+    if (!email || !allowedList.includes(email)) {
+      return res.status(403).json({
+        error: `Access restricted. Email '${email || 'Unknown'}' is not authorized. Authorized accounts: ${allowedList.join(', ')}`,
+      });
+    }
+  }
+
+  return res.json({
+    success: true,
+    authorized: true,
+    email: payload.email || null,
+  });
+});
 
 // Helper to map DB row to Invoice object
 function mapInvoiceRow(row: any, orgRow?: any): Invoice {
@@ -434,22 +568,30 @@ app.get('/api/settings', (_req: Request, res: Response) => {
   const profileRow: any = db.prepare('SELECT value_json FROM settings WHERE key = ?').get('profile');
   const numberingRow: any = db.prepare('SELECT value_json FROM settings WHERE key = ?').get('numbering');
 
+  const profile = profileRow ? JSON.parse(profileRow.value_json) : {};
+  const numbering = numberingRow ? JSON.parse(numberingRow.value_json) : {};
+
   res.json({
-    profile: profileRow ? JSON.parse(profileRow.value_json) : {},
-    numbering: numberingRow ? JSON.parse(numberingRow.value_json) : {},
+    profile: { ...DEFAULT_PROFILE, ...profile },
+    numbering: { ...DEFAULT_NUMBERING, ...numbering },
   });
 });
 
-app.put('/api/settings', (req: Request, res: Response) => {
+const handleSaveSettings = (req: Request, res: Response) => {
   const { profile, numbering } = req.body;
   if (profile) {
-    db.prepare('UPDATE settings SET value_json = ? WHERE key = ?').run(JSON.stringify(profile), 'profile');
+    db.prepare('INSERT INTO settings (key, value_json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json')
+      .run('profile', JSON.stringify(profile));
   }
   if (numbering) {
-    db.prepare('UPDATE settings SET value_json = ? WHERE key = ?').run(JSON.stringify(numbering), 'numbering');
+    db.prepare('INSERT INTO settings (key, value_json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json')
+      .run('numbering', JSON.stringify(numbering));
   }
   res.json({ success: true });
-});
+};
+
+app.put('/api/settings', handleSaveSettings);
+app.post('/api/settings', handleSaveSettings);
 
 app.get('/api/next-number', (req: Request, res: Response) => {
   const docType = (req.query.type as string) || 'BILL OF SUPPLY';

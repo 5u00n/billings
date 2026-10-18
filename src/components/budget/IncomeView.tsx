@@ -164,7 +164,7 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
   const handleExecuteWithdrawal = async (e: React.FormEvent) => {
     e.preventDefault();
     const numAmount = Number(withdrawAmount);
-    const available = currentAccount?.available_balance || 0;
+    const available = availableBalance;
 
     if (!numAmount || numAmount <= 0) {
       setWithdrawError('Withdrawal amount must be greater than ₹0.');
@@ -236,20 +236,25 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
     }
   };
 
-  // Group sums by category
-  const freelanceTotal = incomes
+  // Group sums by category with safe array fallbacks
+  const safeIncomes = Array.isArray(incomes) ? incomes : [];
+  const paidInvoices = Array.isArray(currentAccount?.paid_invoices) ? currentAccount.paid_invoices : [];
+  const unpaidInvoices = Array.isArray(currentAccount?.unpaid_invoices) ? currentAccount.unpaid_invoices : [];
+  const withdrawals = Array.isArray(currentAccount?.withdrawals) ? currentAccount.withdrawals : [];
+
+  const freelanceTotal = safeIncomes
     .filter((i) => i.category === 'fl')
     .reduce((sum, i) => sum + i.amount, 0);
 
-  const salaryTotal = incomes
+  const salaryTotal = safeIncomes
     .filter((i) => i.category === 'sal')
     .reduce((sum, i) => sum + i.amount, 0);
 
-  const extraTotal = incomes
+  const extraTotal = safeIncomes
     .filter((i) => i.category === 'ext')
     .reduce((sum, i) => sum + i.amount, 0);
 
-  const savingsTotal = incomes
+  const savingsTotal = safeIncomes
     .filter((i) => i.category === 'saving')
     .reduce((sum, i) => sum + i.amount, 0);
 
@@ -270,10 +275,10 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
     }
   };
 
-  const availableBalance = currentAccount?.available_balance || 0;
-  const totalRevenuePaid = currentAccount?.total_revenue_paid || 0;
-  const totalWithdrawn = currentAccount?.total_withdrawn || 0;
-  const unpaidReceivables = currentAccount?.unpaid_receivables || 0;
+  const availableBalance = currentAccount?.available_balance ?? (currentAccount as any)?.currentBalance ?? 0;
+  const totalRevenuePaid = currentAccount?.total_revenue_paid ?? (currentAccount as any)?.totalIncome ?? 0;
+  const totalWithdrawn = currentAccount?.total_withdrawn ?? (currentAccount as any)?.totalWithdrawals ?? 0;
+  const unpaidReceivables = currentAccount?.unpaid_receivables ?? 0;
 
   return (
     <div className="space-y-6">
@@ -362,7 +367,7 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
               </div>
             </div>
             <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2">
-              From {currentAccount?.paid_invoices.length || 0} paid client invoice(s).
+              From {paidInvoices.length} paid client invoice(s).
             </p>
           </div>
 
@@ -432,10 +437,10 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
             <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-4 border border-slate-200/80 dark:border-slate-700/80">
               <h4 className="font-bold text-slate-800 dark:text-slate-200 mb-3 flex items-center gap-1.5">
                 <FileText className="w-4 h-4 text-slate-600 dark:text-slate-400" />
-                Client Billing Invoices ({currentAccount?.paid_invoices.length || 0} Paid, {currentAccount?.unpaid_invoices.length || 0} Pending)
+                Client Billing Invoices ({paidInvoices.length} Paid, {unpaidInvoices.length} Pending)
               </h4>
               <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                {currentAccount?.paid_invoices.map((inv) => (
+                {paidInvoices.map((inv) => (
                   <div
                     key={inv.id}
                     className="flex items-center justify-between p-2.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
@@ -457,7 +462,7 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
                   </div>
                 ))}
 
-                {currentAccount?.unpaid_invoices.map((inv) => (
+                {unpaidInvoices.map((inv) => (
                   <div
                     key={inv.id}
                     className="flex items-center justify-between p-2.5 rounded-lg bg-white dark:bg-slate-800 border border-rose-200 dark:border-rose-900/50 text-slate-800 dark:text-slate-200"
@@ -479,7 +484,7 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
                   </div>
                 ))}
 
-                {(!currentAccount?.paid_invoices.length && !currentAccount?.unpaid_invoices.length) && (
+                {(!paidInvoices.length && !unpaidInvoices.length) && (
                   <p className="text-slate-400 italic text-center py-4">No billing invoices found.</p>
                 )}
               </div>
@@ -489,10 +494,10 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
             <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-4 border border-slate-200/80 dark:border-slate-700/80">
               <h4 className="font-bold text-slate-800 dark:text-slate-200 mb-3 flex items-center gap-1.5">
                 <ArrowDownRight className="w-4 h-4 text-slate-600 dark:text-slate-400" />
-                Current Account Owner's Draws ({currentAccount?.withdrawals.length || 0})
+                Current Account Owner's Draws ({withdrawals.length})
               </h4>
               <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                {currentAccount?.withdrawals.map((w) => (
+                {withdrawals.map((w) => (
                   <div
                     key={w.id}
                     className="flex items-center justify-between p-2.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
@@ -519,7 +524,7 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
                   </div>
                 ))}
 
-                {!currentAccount?.withdrawals.length && (
+                {!withdrawals.length && (
                   <p className="text-slate-400 italic text-center py-4">No withdrawals recorded yet. Click "Withdraw to Personal Income" above when needed.</p>
                 )}
               </div>
@@ -577,7 +582,7 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
             </p>
           </div>
           <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-3 py-1 rounded-full">
-            Total Inflow: ₹{formatINR(incomes.reduce((s, i) => s + i.amount, 0))}
+            Total Inflow: ₹{formatINR(safeIncomes.reduce((s, i) => s + i.amount, 0))}
           </span>
         </div>
 
@@ -594,7 +599,7 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {incomes.length === 0 ? (
+              {safeIncomes.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-slate-400">
                     <PiggyBank className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600 mb-2" />
@@ -602,7 +607,7 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
                   </td>
                 </tr>
               ) : (
-                incomes.map((inc) => {
+                safeIncomes.map((inc) => {
                   const meta = getCategoryLabel(inc.category);
                   const isCurrentAccountDraw = inc.source.includes('Current Account') || (inc.notes && inc.notes.includes('Current Account'));
 

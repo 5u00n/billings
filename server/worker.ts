@@ -182,6 +182,34 @@ function verifyFirebaseTokenClaims(payload: any, projectId: string): boolean {
   return true;
 }
 
+let d1MigrationsExecuted = false;
+
+async function ensureD1Migrations(db: D1Database): Promise<void> {
+  if (d1MigrationsExecuted) return;
+  const migrations = [
+    'ALTER TABLE invoices ADD COLUMN hide_qty INTEGER DEFAULT 0',
+    "ALTER TABLE expenses ADD COLUMN tax_classification TEXT DEFAULT 'BUSINESS_DEDUCTIBLE'",
+    'ALTER TABLE expenses ADD COLUMN business_percentage INTEGER DEFAULT 100',
+    'ALTER TABLE expenses ADD COLUMN gst_rate REAL DEFAULT 0',
+    'ALTER TABLE expenses ADD COLUMN gst_itc_eligible INTEGER DEFAULT 0',
+    'ALTER TABLE expenses ADD COLUMN has_invoice_voucher INTEGER DEFAULT 1',
+    'ALTER TABLE expenses ADD COLUMN voucher_ref TEXT',
+    'ALTER TABLE expenses ADD COLUMN linked_borrow_id TEXT',
+    'ALTER TABLE financial_goals ADD COLUMN spent_amount REAL DEFAULT 0',
+    'ALTER TABLE financial_goals ADD COLUMN completed_date TEXT',
+    'ALTER TABLE financial_goals ADD COLUMN linked_expense_id TEXT',
+  ];
+
+  for (const sql of migrations) {
+    try {
+      await db.exec(sql);
+    } catch {
+      // Column or table alteration already applied
+    }
+  }
+  d1MigrationsExecuted = true;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -262,6 +290,8 @@ export default {
           503
         );
       }
+
+      await ensureD1Migrations(db);
 
       const method = request.method.toUpperCase();
 

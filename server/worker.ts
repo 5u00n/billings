@@ -1277,27 +1277,161 @@ export default {
         if (url.pathname === '/api/budget/goals') {
           if (method === 'GET') {
             const { results } = await db.prepare('SELECT * FROM financial_goals ORDER BY target_amount DESC').all();
-            return jsonResponse(results);
+            const formatted = (results || []).map((g: any) => ({
+              ...g,
+              spent_amount: Number(g.spent_amount) || 0,
+              completed_date: g.completed_date || null,
+              linked_expense_id: g.linked_expense_id || null,
+              remaining: Math.max(0, (g.target_amount || 0) - (g.saved_amount || 0)),
+              progress_percent: g.status === 'COMPLETED'
+                ? 100
+                : g.target_amount > 0 ? Math.min(100, Math.round(((g.saved_amount || 0) / g.target_amount) * 100)) : 0,
+            }));
+            return jsonResponse(formatted);
           }
           if (method === 'POST') {
             const b = (await request.json()) as any;
             const id = b.id || crypto.randomUUID();
             await db.prepare(`
-              INSERT INTO financial_goals (id, name, target_amount, savings_percent, saved_amount, target_date, status, notes)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `).bind(id, b.name, b.target_amount, b.savings_percent || 0, b.saved_amount || 0, b.target_date || null, b.status || 'IN_PROGRESS', b.notes || '').run();
+              INSERT INTO financial_goals (id, name, target_amount, savings_percent, saved_amount, target_date, status, spent_amount, completed_date, linked_expense_id, notes)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).bind(
+              id,
+              b.name,
+              b.target_amount,
+              b.savings_percent || 0,
+              b.saved_amount || 0,
+              b.target_date || null,
+              b.status || 'IN_PROGRESS',
+              b.spent_amount || 0,
+              b.completed_date || null,
+              b.linked_expense_id || null,
+              b.notes || ''
+            ).run();
             return jsonResponse({ id, success: true }, 201);
           }
         }
 
         if (url.pathname.startsWith('/api/budget/goals/')) {
-          const id = url.pathname.replace('/api/budget/goals/', '');
+          const subPath = url.pathname.replace('/api/budget/goals/', '');
+          
+          if (subPath.endsWith('/complete') && method === 'POST') {
+            const goalId = subPath.replace('/complete', '');
+            const b = (await request.json()) as any;
+            const goal: any = await db.prepare('SELECT * FROM financial_goals WHERE id = ?').bind(goalId).first();
+            if (!goal) return jsonResponse({ error: 'Financial goal not found' }, 404);
+
+            const finalSpent = Number(b.spent_amount) || goal.target_amount;
+            const finalDate = b.completed_date || new Date().toISOString().substring(0, 10);
+            const finalMonth = finalDate.substring(0, 7);
+            let createdExpenseId: string | null = null;
+
+            if (b.log_expense) {
+              createdExpenseId = `exp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+              const expMethod = b.payment_method || 'UPI';
+              const desc = `Purchased: ${goal.name}`;
+
+              await db.prepare(`
+                INSERT INTO expenses (id, date, month, category, tag, description, amount, payment_method, notes)
+                VALUES (?, ?, ?, 'ext', 'Asset Purchase', ?, ?, ?, ?)
+              `).bind(
+                createdExpenseId,
+                finalDate,
+                finalMonth,
+                desc,
+                finalSpent,
+                expMethod,
+                b.notes || `Asset acquired / Financial Goal completed: ${goal.name}`
+              ).run();
+
+              if (expMethod === 'Credit Card') {
+                try {
+                  await db.prepare(`
+                    INSERT INTO borrow_records (id, date, month, type, person, reason, amount, status)
+                    VALUES (?, ?, ?, 'BORROW', 'Credit Card', ?, ?, 'PENDING')
+                  `).bind(`borrow-cc-${createdExpenseId}`, finalDate, finalMonth, `Credit Card: ${desc}`, finalSpent).run();
+                } catch {}
+              }
+            }
+
+            await db.prepare(`
+              UPDATE financial_goals SET
+                status = 'COMPLETED',
+                spent_amount = ?,
+                completed_date = ?,
+                linked_expense_id = ?,
+                notes = COALESCE(?, notes)
+              WHERE id = ?
+            `).bind(
+              finalSpent,
+              finalDate,
+              createdExpenseId || goal.linked_expense_id || null,
+              b.notes || goal.notes || null,
+              goalId
+            ).run();
+
+            return jsonResponse({
+              success: true,
+              status: 'COMPLETED',
+              spent_amount: finalSpent,
+              completed_date: finalDate,
+              linked_expense_id: createdExpenseId,
+            });
+          }
+
+          if (subPath.endsWith('/reopen') && method === 'POST') {
+            const goalId = subPath.replace('/reopen', '');
+            const b = (await request.json()) as any;
+            const goal: any = await db.prepare('SELECT * FROM financial_goals WHERE id = ?').bind(goalId).first();
+            if (!goal) return jsonResponse({ error: 'Financial goal not found' }, 404);
+
+            if (b.delete_linked_expense && goal.linked_expense_id) {
+              const expId = goal.linked_expense_id;
+              await db.prepare('DELETE FROM expenses WHERE id = ?').bind(expId).run();
+              await db.prepare('DELETE FROM borrow_records WHERE id = ?').bind(`borrow-cc-${expId}`).run();
+            }
+
+            await db.prepare(`
+              UPDATE financial_goals SET
+                status = 'IN_PROGRESS',
+                spent_amount = 0,
+                completed_date = NULL,
+                linked_expense_id = NULL
+              WHERE id = ?
+            `).bind(goalId).run();
+
+            return jsonResponse({ success: true, status: 'IN_PROGRESS' });
+          }
+
+          const id = subPath;
           if (method === 'PUT') {
             const b = (await request.json()) as any;
             await db.prepare(`
-              UPDATE financial_goals SET name = ?, target_amount = ?, savings_percent = ?, saved_amount = ?, target_date = ?, status = ?, notes = ?
+              UPDATE financial_goals SET
+                name = ?,
+                target_amount = ?,
+                savings_percent = ?,
+                saved_amount = ?,
+                target_date = ?,
+                status = ?,
+                spent_amount = ?,
+                completed_date = ?,
+                linked_expense_id = ?,
+                notes = ?
               WHERE id = ?
-            `).bind(b.name, b.target_amount, b.savings_percent || 0, b.saved_amount || 0, b.target_date || null, b.status, b.notes || '', id).run();
+            `).bind(
+              b.name,
+              b.target_amount,
+              b.savings_percent || 0,
+              b.saved_amount || 0,
+              b.target_date || null,
+              b.status || 'IN_PROGRESS',
+              b.spent_amount || 0,
+              b.completed_date || null,
+              b.linked_expense_id || null,
+              b.notes || '',
+              id
+            ).run();
             return jsonResponse({ success: true });
           }
           if (method === 'DELETE') {

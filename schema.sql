@@ -131,6 +131,9 @@ CREATE TABLE IF NOT EXISTS financial_goals (
   saved_amount REAL DEFAULT 0,
   target_date TEXT,
   status TEXT DEFAULT 'IN_PROGRESS',
+  spent_amount REAL DEFAULT 0,
+  completed_date TEXT,
+  linked_expense_id TEXT,
   notes TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

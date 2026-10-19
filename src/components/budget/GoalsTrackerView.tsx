@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FinancialGoal } from '../../types';
+import { FinancialGoal, GoalStatus } from '../../types';
 import { formatINR } from '../../utils/numberToWords';
 import { Button } from '../ui/button';
 import {
@@ -9,10 +9,14 @@ import {
   Trash2,
   X,
   CheckCircle2,
-  TrendingUp,
   Calendar,
   Clock,
   RotateCcw,
+  ShoppingBag,
+  Sparkles,
+  CreditCard,
+  AlertCircle,
+  PackageCheck,
 } from 'lucide-react';
 
 interface GoalsTrackerViewProps {
@@ -26,17 +30,31 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isContributeModalOpen, setIsContributeModalOpen] = useState(false);
+  const [isPurchaseModalOpen, setIsPurchaseModalOpen] = useState(false);
   const [selectedGoal, setSelectedGoal] = useState<FinancialGoal | null>(null);
 
-  // Form State
+  // Form State for Add / Edit Goal
   const [name, setName] = useState('');
   const [targetAmount, setTargetAmount] = useState<number | ''>('');
   const [savingsPercent, setSavingsPercent] = useState<number | ''>('');
   const [savedAmount, setSavedAmount] = useState<number | ''>('');
   const [targetDate, setTargetDate] = useState('');
   const [notes, setNotes] = useState('');
-  const [status, setStatus] = useState<'IN_PROGRESS' | 'REACHED'>('IN_PROGRESS');
+  const [status, setStatus] = useState<GoalStatus>('IN_PROGRESS');
+  const [spentAmount, setSpentAmount] = useState<number | ''>('');
+  const [completedDate, setCompletedDate] = useState('');
+  
+  // Contribution State
   const [contributionAmount, setContributionAmount] = useState<number | ''>('');
+
+  // Purchase / Completion State
+  const [purchaseGoal, setPurchaseGoal] = useState<FinancialGoal | null>(null);
+  const [purchaseAmount, setPurchaseAmount] = useState<number | ''>('');
+  const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().substring(0, 10));
+  const [purchasePaymentMethod, setPurchasePaymentMethod] = useState('UPI');
+  const [logExpense, setLogExpense] = useState(true);
+  const [purchaseNotes, setPurchaseNotes] = useState('');
+
   const [saving, setSaving] = useState(false);
   const [filterTab, setFilterTab] = useState<'ALL' | 'IN_PROGRESS' | 'COMPLETED'>('ALL');
 
@@ -48,6 +66,8 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
     setTargetDate('');
     setNotes('');
     setStatus('IN_PROGRESS');
+    setSpentAmount('');
+    setCompletedDate('');
     setSelectedGoal(null);
   };
 
@@ -64,7 +84,9 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
     setSavedAmount(goal.saved_amount);
     setTargetDate(goal.target_date || '');
     setNotes(goal.notes || '');
-    setStatus(goal.status || (goal.saved_amount >= goal.target_amount ? 'REACHED' : 'IN_PROGRESS'));
+    setStatus(goal.status || 'IN_PROGRESS');
+    setSpentAmount(goal.spent_amount || '');
+    setCompletedDate(goal.completed_date || '');
     setIsModalOpen(true);
   };
 
@@ -74,33 +96,82 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
     setIsContributeModalOpen(true);
   };
 
-  const handleToggleComplete = async (goal: FinancialGoal) => {
+  const handleOpenPurchase = (goal: FinancialGoal) => {
+    setPurchaseGoal(goal);
+    setPurchaseAmount(goal.target_amount || goal.saved_amount || '');
+    setPurchaseDate(new Date().toISOString().substring(0, 10));
+    setPurchasePaymentMethod('UPI');
+    setLogExpense(true);
+    setPurchaseNotes(goal.notes || '');
+    setIsPurchaseModalOpen(true);
+  };
+
+  const handleConfirmPurchase = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!purchaseGoal || !purchaseAmount || Number(purchaseAmount) <= 0) {
+      alert('Please enter a valid amount spent.');
+      return;
+    }
+
     try {
       setSaving(true);
-      const isCurrentlyReached = goal.status === 'REACHED' || goal.saved_amount >= goal.target_amount;
-      const nextStatus = isCurrentlyReached ? 'IN_PROGRESS' : 'REACHED';
-      // When completing, if saved_amount is less than target, automatically top it to target_amount
-      const nextSaved = (!isCurrentlyReached && goal.saved_amount < goal.target_amount)
-        ? goal.target_amount
-        : goal.saved_amount;
-
-      const res = await fetch(`/api/budget/goals/${goal.id}`, {
-        method: 'PUT',
+      const res = await fetch(`/api/budget/goals/${purchaseGoal.id}/complete`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...goal,
-          status: nextStatus,
-          saved_amount: nextSaved,
+          spent_amount: Number(purchaseAmount),
+          completed_date: purchaseDate,
+          payment_method: purchasePaymentMethod,
+          log_expense: logExpense,
+          notes: purchaseNotes.trim() || undefined,
         }),
       });
 
       if (!res.ok) {
-        throw new Error('Failed to update goal completion status');
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to complete goal purchase.');
       }
+
+      setIsPurchaseModalOpen(false);
+      setPurchaseGoal(null);
       onRefresh();
     } catch (err: any) {
-      console.error('Failed to toggle goal status:', err);
-      alert(err.message || 'Failed to update goal.');
+      console.error('Failed to complete goal:', err);
+      alert(err.message || 'Failed to complete goal.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReopenGoal = async (goal: FinancialGoal) => {
+    let deleteExpense = false;
+    if (goal.linked_expense_id) {
+      deleteExpense = confirm(
+        `Reopening "${goal.name}".\n\nThis goal has an associated expense of ₹${formatINR(goal.spent_amount || goal.target_amount)} in your expense ledger.\n\nClick OK to also DELETE the expense entry from your ledger.\nClick Cancel to keep the expense entry.`
+      );
+    } else {
+      if (!confirm(`Reopen "${goal.name}"? It will return to Active (In Progress).`)) {
+        return;
+      }
+    }
+
+    try {
+      setSaving(true);
+      const res = await fetch(`/api/budget/goals/${goal.id}/reopen`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delete_linked_expense: deleteExpense }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to reopen goal.');
+      }
+
+      onRefresh();
+    } catch (err: any) {
+      console.error('Failed to reopen goal:', err);
+      alert(err.message || 'Failed to reopen goal.');
     } finally {
       setSaving(false);
     }
@@ -115,17 +186,15 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
 
     try {
       setSaving(true);
-      const finalStatus = status === 'REACHED' || (savedAmount && Number(savedAmount) >= Number(targetAmount))
-        ? 'REACHED'
-        : 'IN_PROGRESS';
-
-      const payload = {
+      const payload: any = {
         name: name.trim(),
         target_amount: Number(targetAmount),
         savings_percent: savingsPercent ? Number(savingsPercent) / 100 : 0.05,
-        saved_amount: savedAmount ? Number(savedAmount) : (finalStatus === 'REACHED' ? Number(targetAmount) : 0),
+        saved_amount: savedAmount ? Number(savedAmount) : 0,
         target_date: targetDate || undefined,
-        status: finalStatus,
+        status,
+        spent_amount: status === 'COMPLETED' ? (spentAmount ? Number(spentAmount) : Number(targetAmount)) : 0,
+        completed_date: status === 'COMPLETED' ? (completedDate || new Date().toISOString().substring(0, 10)) : undefined,
         notes: notes.trim() || undefined,
       };
 
@@ -195,17 +264,21 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
     }
   };
 
+  // Metrics Calculation
   const totalTarget = goals.reduce((sum, g) => sum + g.target_amount, 0);
-  const totalSaved = goals.reduce((sum, g) => sum + g.saved_amount, 0);
-  const overallPct = totalTarget > 0 ? Math.round((totalSaved / totalTarget) * 100) : 0;
-  const completedGoals = goals.filter((g) => g.status === 'REACHED' || g.saved_amount >= g.target_amount).length;
+  const activeGoals = goals.filter((g) => g.status !== 'COMPLETED');
+  const completedGoals = goals.filter((g) => g.status === 'COMPLETED');
+  
+  // Real active savings in piggy banks (money that still exists as unspent cash)
+  const activeSavedPortfolio = activeGoals.reduce((sum, g) => sum + g.saved_amount, 0);
+  // Total value of acquired assets (money disbursed/paid to fulfill goals)
+  const acquiredAssetsValue = completedGoals.reduce((sum, g) => sum + (g.spent_amount || g.target_amount), 0);
 
-  const inProgressGoals = goals.filter((g) => g.status !== 'REACHED' && g.saved_amount < g.target_amount);
-  const reachedGoals = goals.filter((g) => g.status === 'REACHED' || g.saved_amount >= g.target_amount);
+  const inProgressGoals = goals.filter((g) => g.status !== 'COMPLETED');
   const displayedGoals = filterTab === 'IN_PROGRESS'
     ? inProgressGoals
     : filterTab === 'COMPLETED'
-    ? reachedGoals
+    ? completedGoals
     : goals;
 
   return (
@@ -216,26 +289,30 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
           <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Targets</span>
           <div className="mt-1 flex items-baseline justify-between">
             <span className="text-xl font-bold text-slate-900 dark:text-white">₹{formatINR(totalTarget)}</span>
-            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">{goals.length} goals</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">{goals.length} milestones</span>
           </div>
         </div>
 
         <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-2xs">
-          <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Saved Portfolio</span>
+          <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Active Savings Stash</span>
           <div className="mt-1 flex items-baseline justify-between">
-            <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400">₹{formatINR(totalSaved)}</span>
-            <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full">
-              {overallPct}% Reached
+            <span className="text-xl font-bold text-blue-600 dark:text-blue-400">₹{formatINR(activeSavedPortfolio)}</span>
+            <span className="text-xs font-bold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded-full">
+              {activeGoals.length} In Progress
             </span>
           </div>
+          <span className="text-[10px] text-slate-400 block mt-1">Unspent cash accumulating in savings</span>
         </div>
 
         <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-2xs">
-          <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Completed Milestones</span>
+          <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Acquired Assets (Paid)</span>
           <div className="mt-1 flex items-baseline justify-between">
-            <span className="text-xl font-bold text-indigo-700 dark:text-indigo-400">{completedGoals} of {goals.length}</span>
-            <span className="text-xs text-indigo-600 dark:text-indigo-300 font-medium">Assets & Needs</span>
+            <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400">₹{formatINR(acquiredAssetsValue)}</span>
+            <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full">
+              {completedGoals.length} Acquired
+            </span>
           </div>
+          <span className="text-[10px] text-slate-400 block mt-1">Disbursed & completed milestones</span>
         </div>
 
         <div className="flex items-center">
@@ -270,7 +347,7 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
                 : 'hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            In Progress ({inProgressGoals.length})
+            In Progress ({activeGoals.length})
           </button>
           <button
             onClick={() => setFilterTab('COMPLETED')}
@@ -280,7 +357,7 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
                 : 'hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            Completed ({reachedGoals.length})
+            Completed & Bought ({completedGoals.length})
           </button>
         </div>
 
@@ -292,14 +369,21 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
       {/* Grid of Goal Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5">
         {displayedGoals.map((goal) => {
-          const pct = Math.min(Math.round((goal.saved_amount / goal.target_amount) * 100), 100);
-          const isReached = goal.status === 'REACHED' || goal.saved_amount >= goal.target_amount;
+          const isCompleted = goal.status === 'COMPLETED';
+          const isReadyToBuy = !isCompleted && (goal.status === 'REACHED' || goal.saved_amount >= goal.target_amount);
+          const pct = isCompleted
+            ? 100
+            : Math.min(Math.round((goal.saved_amount / goal.target_amount) * 100), 100);
 
           return (
             <div
               key={goal.id}
               className={`bg-white dark:bg-slate-900 rounded-xl border p-5 shadow-2xs flex flex-col justify-between transition-all hover:shadow-xs ${
-                isReached ? 'border-emerald-400 dark:border-emerald-600 ring-2 ring-emerald-400/20 bg-emerald-50/10 dark:bg-emerald-950/10' : 'border-slate-200/80 dark:border-slate-800'
+                isCompleted
+                  ? 'border-emerald-500/60 dark:border-emerald-600/60 ring-2 ring-emerald-500/20 bg-emerald-50/15 dark:bg-emerald-950/20'
+                  : isReadyToBuy
+                  ? 'border-blue-400 dark:border-blue-600 ring-2 ring-blue-400/20 bg-blue-50/10 dark:bg-blue-950/10'
+                  : 'border-slate-200/80 dark:border-slate-800'
               }`}
             >
               <div>
@@ -307,65 +391,115 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
                   <div className="flex items-center gap-2">
                     <div
                       className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                        isReached ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-400' : 'bg-blue-50 text-blue-600 dark:bg-blue-950/80 dark:text-blue-400'
+                        isCompleted
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-400'
+                          : isReadyToBuy
+                          ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/80 dark:text-blue-400'
+                          : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
                       }`}
                     >
-                      <Target className="w-4 h-4" />
+                      {isCompleted ? (
+                        <PackageCheck className="w-4 h-4" />
+                      ) : isReadyToBuy ? (
+                        <Sparkles className="w-4 h-4" />
+                      ) : (
+                        <Target className="w-4 h-4" />
+                      )}
                     </div>
                     <div>
-                      <h4 className="text-sm font-bold text-slate-900 dark:text-white">{goal.name}</h4>
-                      {goal.target_date && (
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white leading-tight">{goal.name}</h4>
+                      {isCompleted && goal.completed_date ? (
+                        <span className="flex items-center gap-1 text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold">
+                          <CheckCircle2 className="w-2.5 h-2.5" />
+                          Acquired: {goal.completed_date}
+                        </span>
+                      ) : goal.target_date ? (
                         <span className="flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500">
                           <Calendar className="w-2.5 h-2.5" />
                           Target: {goal.target_date}
                         </span>
-                      )}
+                      ) : null}
                     </div>
                   </div>
 
-                  {isReached ? (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 shadow-2xs">
+                  {isCompleted ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 shadow-2xs">
                       <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                      Reached
+                      Bought
+                    </span>
+                  ) : isReadyToBuy ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-800 shadow-2xs">
+                      <Sparkles className="w-3 h-3 text-blue-600" />
+                      Ready
                     </span>
                   ) : (
                     <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                      {Math.round(goal.savings_percent * 100)}% monthly share
+                      {Math.round(goal.savings_percent * 100)}% share
                     </span>
                   )}
                 </div>
 
                 {/* Amount Figures */}
                 <div className="my-4 space-y-1">
-                  <div className="flex items-baseline justify-between text-xs">
-                    <span className="text-slate-500 dark:text-slate-400 font-medium">Saved:</span>
-                    <span className={`font-bold tabular-nums ${isReached ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-900 dark:text-white'}`}>
-                      ₹{formatINR(goal.saved_amount)}
-                    </span>
-                  </div>
-                  <div className="flex items-baseline justify-between text-xs">
-                    <span className="text-slate-500 dark:text-slate-400 font-medium">Target:</span>
-                    <span className="text-slate-600 dark:text-slate-300 font-semibold tabular-nums">
-                      ₹{formatINR(goal.target_amount)}
-                    </span>
-                  </div>
+                  {isCompleted ? (
+                    <>
+                      <div className="flex items-baseline justify-between text-xs">
+                        <span className="text-slate-600 dark:text-slate-400 font-medium">Paid / Spent:</span>
+                        <span className="font-extrabold text-emerald-700 dark:text-emerald-400 text-sm tabular-nums">
+                          ₹{formatINR(goal.spent_amount || goal.target_amount)}
+                        </span>
+                      </div>
+                      <div className="flex items-baseline justify-between text-xs">
+                        <span className="text-slate-400 dark:text-slate-500">Target Value:</span>
+                        <span className="text-slate-500 dark:text-slate-400 tabular-nums">
+                          ₹{formatINR(goal.target_amount)}
+                        </span>
+                      </div>
+                      <div className="mt-1 pt-1 border-t border-emerald-200/50 dark:border-emerald-800/40">
+                        <span className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-100/70 dark:bg-emerald-950/80 px-1.5 py-0.5 rounded block text-center">
+                          ✓ Money Disbursed • Asset Acquired
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-baseline justify-between text-xs">
+                        <span className="text-slate-500 dark:text-slate-400 font-medium">Saved Cash:</span>
+                        <span className="font-bold text-slate-900 dark:text-white tabular-nums">
+                          ₹{formatINR(goal.saved_amount)}
+                        </span>
+                      </div>
+                      <div className="flex items-baseline justify-between text-xs">
+                        <span className="text-slate-500 dark:text-slate-400 font-medium">Target:</span>
+                        <span className="text-slate-600 dark:text-slate-300 font-semibold tabular-nums">
+                          ₹{formatINR(goal.target_amount)}
+                        </span>
+                      </div>
+                    </>
+                  )}
 
                   {/* Progress Bar */}
                   <div className="pt-2">
                     <div className="flex items-center justify-between text-[11px] mb-1">
-                      <span className="text-slate-400 dark:text-slate-500 font-medium">Progress</span>
-                      <span className="font-bold text-slate-700 dark:text-slate-300">{isReached ? 100 : pct}%</span>
+                      <span className="text-slate-400 dark:text-slate-500 font-medium">
+                        {isCompleted ? 'Fulfilled' : 'Progress'}
+                      </span>
+                      <span className="font-bold text-slate-700 dark:text-slate-300">
+                        {isCompleted ? 100 : pct}%
+                      </span>
                     </div>
                     <div className="w-full h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                       <div
                         className={`h-full rounded-full transition-all duration-500 ${
-                          isReached
+                          isCompleted
                             ? 'bg-emerald-500'
-                            : pct > 50
+                            : isReadyToBuy
                             ? 'bg-blue-600'
-                            : 'bg-indigo-500'
+                            : pct > 50
+                            ? 'bg-indigo-600'
+                            : 'bg-slate-400'
                         }`}
-                        style={{ width: `${isReached ? 100 : pct}%` }}
+                        style={{ width: `${isCompleted ? 100 : pct}%` }}
                       />
                     </div>
                   </div>
@@ -381,32 +515,46 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
               {/* Action Buttons */}
               <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-1.5">
                 <div className="flex items-center gap-1.5">
-                  <Button
-                    size="sm"
-                    variant={isReached ? "secondary" : "outline"}
-                    onClick={() => handleToggleComplete(goal)}
-                    disabled={saving}
-                    className={`gap-1 text-[11px] font-semibold h-7.5 px-2.5 rounded-lg cursor-pointer transition-colors ${
-                      isReached
-                        ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 hover:bg-amber-50 hover:text-amber-700 hover:border-amber-300 dark:hover:bg-amber-950/40'
-                        : 'text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 dark:hover:bg-emerald-950/40'
-                    }`}
-                    title={isReached ? "Click to Reopen Goal" : "Click to Mark Goal as Completed"}
-                  >
-                    <CheckCircle2 className={`w-3.5 h-3.5 ${isReached ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`} />
-                    <span>{isReached ? 'Completed' : 'Complete'}</span>
-                  </Button>
-
-                  {!isReached && (
+                  {isCompleted ? (
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleOpenContribute(goal)}
-                      className="gap-1 text-[11px] text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-900/60 hover:bg-blue-50 dark:hover:bg-blue-950/40 font-semibold h-7.5 px-2 rounded-lg cursor-pointer"
+                      onClick={() => handleReopenGoal(goal)}
+                      disabled={saving}
+                      className="gap-1 text-[11px] font-semibold h-7.5 px-2.5 rounded-lg cursor-pointer text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-amber-50 hover:text-amber-700 hover:border-amber-300 dark:hover:bg-amber-950/40 transition-colors"
+                      title="Reopen milestone as active in-progress"
                     >
-                      <Plus className="w-3 h-3" />
-                      Add
+                      <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Reopen</span>
                     </Button>
+                  ) : (
+                    <>
+                      <Button
+                        size="sm"
+                        onClick={() => handleOpenPurchase(goal)}
+                        disabled={saving}
+                        className={`gap-1 text-[11px] font-bold h-7.5 px-2.5 rounded-lg cursor-pointer transition-colors ${
+                          isReadyToBuy
+                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
+                            : 'bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100'
+                        }`}
+                        title="Mark as bought/paid, record purchase details and expense outflow"
+                      >
+                        <ShoppingBag className="w-3.5 h-3.5" />
+                        <span>{isReadyToBuy ? 'Buy Now' : 'Mark Bought'}</span>
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleOpenContribute(goal)}
+                        className="gap-1 text-[11px] text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-900/60 hover:bg-blue-50 dark:hover:bg-blue-950/40 font-semibold h-7.5 px-2 rounded-lg cursor-pointer"
+                        title="Add savings contribution to this goal"
+                      >
+                        <Plus className="w-3 h-3" />
+                        Save
+                      </Button>
+                    </>
                   )}
                 </div>
 
@@ -431,6 +579,145 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
           );
         })}
       </div>
+
+      {/* Mark as Bought / Complete Milestone Modal */}
+      {isPurchaseModalOpen && purchaseGoal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-2xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 bg-emerald-50/80 dark:bg-emerald-950/60 border-b border-emerald-100 dark:border-emerald-900/60 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 flex items-center justify-center">
+                  <ShoppingBag className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Mark as Bought / Acquired
+                  </h3>
+                  <p className="text-[11px] text-emerald-800 dark:text-emerald-300 font-medium">
+                    {purchaseGoal.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsPurchaseModalOpen(false)}
+                className="p-1 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmPurchase} className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Purchase Date
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={purchaseDate}
+                    onChange={(e) => setPurchaseDate(e.target.value)}
+                    className="w-full px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Amount Paid / Spent (₹)
+                  </label>
+                  <input
+                    type="number"
+                    step="1"
+                    required
+                    placeholder="0.00"
+                    value={purchaseAmount}
+                    onChange={(e) =>
+                      setPurchaseAmount(e.target.value === '' ? '' : Number(e.target.value))
+                    }
+                    className="w-full px-3 py-1.5 text-xs font-bold text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Payment Method
+                </label>
+                <select
+                  value={purchasePaymentMethod}
+                  onChange={(e) => setPurchasePaymentMethod(e.target.value)}
+                  className="w-full px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                >
+                  <option value="UPI">UPI / GPay / PhonePe</option>
+                  <option value="Bank Transfer">Bank Transfer / Net Banking</option>
+                  <option value="Credit Card">Credit Card (Auto-recorded as Borrow)</option>
+                  <option value="Debit Card">Debit Card</option>
+                  <option value="Cash">Cash</option>
+                </select>
+              </div>
+
+              {/* Record in Expense Ledger Checkbox */}
+              <div className="bg-slate-50 dark:bg-slate-800/60 p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-700/80 space-y-2">
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={logExpense}
+                    onChange={(e) => setLogExpense(e.target.checked)}
+                    className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                      Record as Outflow in {purchaseDate ? purchaseDate.substring(0, 7) : 'Current Month'} Expense Ledger
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                      Deducts this purchase from monthly cash flow under Extra Expenses (tagged <em>Asset Purchase</em>).
+                    </span>
+                  </div>
+                </label>
+
+                {purchasePaymentMethod === 'Credit Card' && logExpense && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 px-2.5 py-1.5 rounded-lg border border-purple-200 dark:border-purple-800/60">
+                    <CreditCard className="w-3.5 h-3.5 shrink-0" />
+                    <span>Credit Card payment will also be auto-recorded under Loans & Debts.</span>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Notes / Receipt / Warranty Info (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Purchased at Croma, Bill #4928"
+                  value={purchaseNotes}
+                  onChange={(e) => setPurchaseNotes(e.target.value)}
+                  className="w-full px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsPurchaseModalOpen(false)}
+                  disabled={saving}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={saving}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer"
+                >
+                  {saving ? 'Processing...' : 'Confirm Purchase & Complete Goal'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Add / Edit Goal Modal */}
       {isModalOpen && (
@@ -482,7 +769,7 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Initial Saved (₹)
+                    Saved in Stash (₹)
                   </label>
                   <input
                     type="number"
@@ -537,7 +824,7 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
                     type="button"
                     onClick={() => setStatus('IN_PROGRESS')}
                     className={`py-2 px-3 text-xs font-semibold rounded-lg border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                      status === 'IN_PROGRESS'
+                      status === 'IN_PROGRESS' || status === 'REACHED'
                         ? 'border-blue-600 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-400 shadow-xs'
                         : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
                     }`}
@@ -548,22 +835,53 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      setStatus('REACHED');
-                      if (targetAmount && (!savedAmount || Number(savedAmount) < Number(targetAmount))) {
-                        setSavedAmount(targetAmount);
+                      setStatus('COMPLETED');
+                      if (targetAmount && (!spentAmount || Number(spentAmount) <= 0)) {
+                        setSpentAmount(targetAmount);
+                      }
+                      if (!completedDate) {
+                        setCompletedDate(new Date().toISOString().substring(0, 10));
                       }
                     }}
                     className={`py-2 px-3 text-xs font-semibold rounded-lg border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                      status === 'REACHED'
+                      status === 'COMPLETED'
                         ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 shadow-xs'
                         : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
                     }`}
                   >
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Completed (Reached)</span>
+                    <span>Completed & Bought</span>
                   </button>
                 </div>
               </div>
+
+              {status === 'COMPLETED' && (
+                <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-800/60 grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      Spent / Paid (₹)
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      value={spentAmount}
+                      onChange={(e) => setSpentAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                      className="w-full px-2.5 py-1 text-xs font-bold border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-800 rounded-md"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      Date Acquired
+                    </label>
+                    <input
+                      type="date"
+                      value={completedDate}
+                      onChange={(e) => setCompletedDate(e.target.value)}
+                      className="w-full px-2.5 py-1 text-xs border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-800 rounded-md"
+                    />
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">

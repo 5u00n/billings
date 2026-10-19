@@ -142,6 +142,10 @@ export const offlineCache = {
     } else if (mutationUrl.includes('/api/budget/goals')) {
       offlineCache.invalidate('/api/budget/goals');
       offlineCache.invalidate('/api/budget/month-bundle');
+      offlineCache.invalidate('/api/budget/expenses');
+      offlineCache.invalidate('/api/budget/borrow');
+      offlineCache.invalidate('/api/budget/summary');
+      offlineCache.invalidate('/api/budget/monthly-breakdown');
     } else if (mutationUrl.includes('/api/budget/summary')) {
       offlineCache.invalidate('/api/budget/summary');
       offlineCache.invalidate('/api/budget/month-bundle');

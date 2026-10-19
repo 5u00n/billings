@@ -147,6 +147,9 @@ db.exec(`
     saved_amount REAL DEFAULT 0,
     target_date TEXT,
     status TEXT DEFAULT 'IN_PROGRESS',
+    spent_amount REAL DEFAULT 0,
+    completed_date TEXT,
+    linked_expense_id TEXT,
     notes TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -220,6 +223,17 @@ try {
 } catch (e) {}
 try {
   db.exec('ALTER TABLE expenses ADD COLUMN linked_borrow_id TEXT');
+} catch (e) {}
+
+// Safe column migrations for financial_goals table
+try {
+  db.exec('ALTER TABLE financial_goals ADD COLUMN spent_amount REAL DEFAULT 0');
+} catch (e) {}
+try {
+  db.exec('ALTER TABLE financial_goals ADD COLUMN completed_date TEXT');
+} catch (e) {}
+try {
+  db.exec('ALTER TABLE financial_goals ADD COLUMN linked_expense_id TEXT');
 } catch (e) {}
 
 // Seed statutory Indian tax compliance reminders if empty

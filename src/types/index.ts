@@ -372,6 +372,8 @@ export interface MonthlyBudgetSummary {
   notes?: string;
 }
 
+export type GoalStatus = 'IN_PROGRESS' | 'REACHED' | 'COMPLETED';
+
 export interface FinancialGoal {
   id: string;
   name: string;
@@ -379,9 +381,14 @@ export interface FinancialGoal {
   savings_percent: number;
   saved_amount: number;
   target_date?: string;
-  status: 'IN_PROGRESS' | 'REACHED';
+  status: GoalStatus;
+  spent_amount?: number;
+  completed_date?: string;
+  linked_expense_id?: string;
   notes?: string;
   created_at?: string;
+  remaining?: number;
+  progress_percent?: number;
 }
 
 export interface BudgetAllocationRule {

@@ -2671,8 +2671,13 @@ app.get('/api/budget/goals', (_req: Request, res: Response) => {
     const rows: any[] = db.prepare('SELECT * FROM financial_goals ORDER BY target_amount ASC').all();
     const formatted = rows.map((g) => ({
       ...g,
+      spent_amount: Number(g.spent_amount) || 0,
+      completed_date: g.completed_date || null,
+      linked_expense_id: g.linked_expense_id || null,
       remaining: Math.max(0, g.target_amount - g.saved_amount),
-      progress_percent: g.target_amount > 0 ? Math.min(100, Math.round((g.saved_amount / g.target_amount) * 100)) : 0,
+      progress_percent: g.status === 'COMPLETED'
+        ? 100
+        : g.target_amount > 0 ? Math.min(100, Math.round((g.saved_amount / g.target_amount) * 100)) : 0,
     }));
     res.json(formatted);
   } catch (err: any) {
@@ -2685,8 +2690,8 @@ app.post('/api/budget/goals', (req: Request, res: Response) => {
   const id = body.id || `goal-${Date.now()}`;
   try {
     db.prepare(`
-      INSERT INTO financial_goals (id, name, target_amount, savings_percent, saved_amount, target_date, status, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO financial_goals (id, name, target_amount, savings_percent, saved_amount, target_date, status, spent_amount, completed_date, linked_expense_id, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       body.name,
@@ -2695,6 +2700,9 @@ app.post('/api/budget/goals', (req: Request, res: Response) => {
       Number(body.saved_amount) || 0,
       body.target_date || null,
       body.status || 'IN_PROGRESS',
+      Number(body.spent_amount) || 0,
+      body.completed_date || null,
+      body.linked_expense_id || null,
       body.notes || ''
     );
     res.json({ success: true, id });
@@ -2714,6 +2722,9 @@ app.put('/api/budget/goals/:id', (req: Request, res: Response) => {
         saved_amount = ?,
         target_date = ?,
         status = ?,
+        spent_amount = ?,
+        completed_date = ?,
+        linked_expense_id = ?,
         notes = ?
       WHERE id = ?
     `).run(
@@ -2723,12 +2734,127 @@ app.put('/api/budget/goals/:id', (req: Request, res: Response) => {
       Number(body.saved_amount) || 0,
       body.target_date || null,
       body.status || 'IN_PROGRESS',
+      Number(body.spent_amount) || 0,
+      body.completed_date || null,
+      body.linked_expense_id || null,
       body.notes || '',
       req.params.id
     );
     res.json({ success: true });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/budget/goals/:id/complete', (req: Request, res: Response) => {
+  const goalId = req.params.id;
+  const { spent_amount, completed_date, payment_method, log_expense, notes } = req.body;
+
+  try {
+    const goal: any = db.prepare('SELECT * FROM financial_goals WHERE id = ?').get(goalId);
+    if (!goal) {
+      return res.status(404).json({ error: 'Financial goal not found' });
+    }
+
+    const finalSpent = Number(spent_amount) || goal.target_amount;
+    const finalDate = completed_date || new Date().toISOString().substring(0, 10);
+    const finalMonth = finalDate.substring(0, 7);
+    let createdExpenseId: string | null = null;
+
+    if (log_expense) {
+      createdExpenseId = `exp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const expMethod = payment_method || 'UPI';
+      const desc = `Purchased: ${goal.name}`;
+      
+      db.prepare(`
+        INSERT INTO expenses (id, date, month, category, tag, description, amount, payment_method, notes)
+        VALUES (?, ?, ?, 'ext', 'Asset Purchase', ?, ?, ?, ?)
+      `).run(
+        createdExpenseId,
+        finalDate,
+        finalMonth,
+        desc,
+        finalSpent,
+        expMethod,
+        notes || `Asset acquired / Financial Goal completed: ${goal.name}`
+      );
+
+      // If paid via Credit Card, also auto-create pending borrow liability
+      if (expMethod === 'Credit Card') {
+        const borrowId = `borrow-cc-${createdExpenseId}`;
+        try {
+          db.prepare(`
+            INSERT INTO borrow_records (id, date, month, type, person, reason, amount, status)
+            VALUES (?, ?, ?, 'BORROW', 'Credit Card', ?, ?, 'PENDING')
+          `).run(borrowId, finalDate, finalMonth, `Credit Card: ${desc}`, finalSpent);
+        } catch (bErr) {
+          console.error('Failed to auto-create borrow for CC goal purchase:', bErr);
+        }
+      }
+
+      calculateBudgetSummary(finalMonth);
+    }
+
+    db.prepare(`
+      UPDATE financial_goals SET
+        status = 'COMPLETED',
+        spent_amount = ?,
+        completed_date = ?,
+        linked_expense_id = ?,
+        notes = COALESCE(?, notes)
+      WHERE id = ?
+    `).run(
+      finalSpent,
+      finalDate,
+      createdExpenseId || goal.linked_expense_id || null,
+      notes || goal.notes || null,
+      goalId
+    );
+
+    res.json({
+      success: true,
+      status: 'COMPLETED',
+      spent_amount: finalSpent,
+      completed_date: finalDate,
+      linked_expense_id: createdExpenseId,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/budget/goals/:id/reopen', (req: Request, res: Response) => {
+  const goalId = req.params.id;
+  const { delete_linked_expense } = req.body;
+
+  try {
+    const goal: any = db.prepare('SELECT * FROM financial_goals WHERE id = ?').get(goalId);
+    if (!goal) {
+      return res.status(404).json({ error: 'Financial goal not found' });
+    }
+
+    if (delete_linked_expense && goal.linked_expense_id) {
+      const expId = goal.linked_expense_id;
+      const expRow: any = db.prepare('SELECT month FROM expenses WHERE id = ?').get(expId);
+      db.prepare('DELETE FROM expenses WHERE id = ?').run(expId);
+      db.prepare('DELETE FROM borrow_records WHERE id = ?').run(`borrow-cc-${expId}`);
+      if (expRow?.month) {
+        calculateBudgetSummary(expRow.month);
+      }
+    }
+
+    db.prepare(`
+      UPDATE financial_goals SET
+        status = 'IN_PROGRESS',
+        spent_amount = 0,
+        completed_date = NULL,
+        linked_expense_id = NULL
+      WHERE id = ?
+    `).run(goalId);
+
+    res.json({ success: true, status: 'IN_PROGRESS' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 

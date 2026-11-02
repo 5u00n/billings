@@ -1,11 +1,12 @@
+import { getCurrentBudgetMonth, includeCurrentBudgetMonth, useBudgetMonth } from '../../lib/budgetMonth';
 import React, { useState, useEffect } from 'react';
 import { IncomeEntry } from '../../types';
 import { IncomeView } from './IncomeView';
 import { Wallet, Calendar, ChevronDown } from 'lucide-react';
 
 export const IncomePage: React.FC = () => {
-  const [selectedMonth, setSelectedMonth] = useState<string>('2026-10');
-  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+  const [selectedMonth, setSelectedMonth] = useBudgetMonth();
+  const [availableMonths, setAvailableMonths] = useState<string[]>(() => [getCurrentBudgetMonth()]);
   const [incomes, setIncomes] = useState<IncomeEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -14,6 +15,7 @@ export const IncomePage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    setAvailableMonths((months) => includeCurrentBudgetMonth(months));
     if (selectedMonth) {
       loadIncomes(selectedMonth);
     }
@@ -22,14 +24,14 @@ export const IncomePage: React.FC = () => {
   const fetchMonths = async () => {
     try {
       const res = await fetch('/api/budget/months');
-      const data = await res.json();
+      const data = includeCurrentBudgetMonth(await res.json());
       if (Array.isArray(data) && data.length > 0) {
         setAvailableMonths(data);
         if (!data.includes(selectedMonth)) {
           setSelectedMonth(data[0]);
         }
       } else {
-        const currentM = new Date().toISOString().substring(0, 7);
+        const currentM = getCurrentBudgetMonth();
         setAvailableMonths([currentM]);
         setSelectedMonth(currentM);
       }

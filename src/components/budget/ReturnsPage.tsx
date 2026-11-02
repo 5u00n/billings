@@ -1,11 +1,12 @@
+import { getCurrentBudgetMonth, includeCurrentBudgetMonth, useBudgetMonth } from '../../lib/budgetMonth';
 import React, { useState, useEffect } from 'react';
 import { BorrowRecord } from '../../types';
 import { ReturnsTrackerView } from './ReturnsTrackerView';
 import { HandCoins, Calendar, ChevronDown } from 'lucide-react';
 
 export const ReturnsPage: React.FC = () => {
-  const [selectedMonth, setSelectedMonth] = useState<string>('2026-10');
-  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+  const [selectedMonth, setSelectedMonth] = useBudgetMonth();
+  const [availableMonths, setAvailableMonths] = useState<string[]>(() => [getCurrentBudgetMonth()]);
   const [records, setRecords] = useState<BorrowRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -14,6 +15,7 @@ export const ReturnsPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    setAvailableMonths((months) => includeCurrentBudgetMonth(months));
     if (selectedMonth) {
       loadBorrows(selectedMonth);
     }
@@ -23,7 +25,7 @@ export const ReturnsPage: React.FC = () => {
     try {
       const res = await fetch('/api/budget/months');
       if (!res.ok) return [];
-      const data = await res.json();
+      const data = includeCurrentBudgetMonth(await res.json());
       if (Array.isArray(data) && data.length > 0) {
         setAvailableMonths(data);
         if (!data.includes(selectedMonth) && selectedMonth !== 'all') {
@@ -31,7 +33,7 @@ export const ReturnsPage: React.FC = () => {
         }
         return data;
       } else {
-        const currentM = new Date().toISOString().substring(0, 7);
+        const currentM = getCurrentBudgetMonth();
         setAvailableMonths([currentM]);
         if (selectedMonth !== 'all') {
           setSelectedMonth(currentM);

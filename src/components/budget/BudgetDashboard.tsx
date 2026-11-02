@@ -1,3 +1,4 @@
+import { getCurrentBudgetMonth, includeCurrentBudgetMonth, useBudgetMonth } from '../../lib/budgetMonth';
 import React, { useState, useEffect } from 'react';
 import {
   MonthlyBudgetSummary,
@@ -85,8 +86,8 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
   const isStage3Active = activeSubTab === 'borrow';
   const isStage4Active = activeSubTab === 'monthly-table' || activeSubTab === 'goals';
 
-  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
-  const [selectedMonth, setSelectedMonth] = useState<string>('2026-10');
+  const [availableMonths, setAvailableMonths] = useState<string[]>(() => [getCurrentBudgetMonth()]);
+  const [selectedMonth, setSelectedMonth] = useBudgetMonth();
   const [loading, setLoading] = useState(true);
 
   // Core Data State
@@ -117,6 +118,7 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
   }, []);
 
   useEffect(() => {
+    setAvailableMonths((months) => includeCurrentBudgetMonth(months));
     if (selectedMonth) {
       loadMonthData(selectedMonth);
     }
@@ -125,14 +127,14 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
   const fetchMonths = async () => {
     try {
       const res = await fetch('/api/budget/months');
-      const data = await res.json();
+      const data = includeCurrentBudgetMonth(await res.json());
       if (Array.isArray(data) && data.length > 0) {
         setAvailableMonths(data);
         if (!data.includes(selectedMonth)) {
           setSelectedMonth(data[0]);
         }
       } else {
-        const currentM = new Date().toISOString().substring(0, 7);
+        const currentM = getCurrentBudgetMonth();
         setAvailableMonths([currentM]);
         setSelectedMonth(currentM);
       }

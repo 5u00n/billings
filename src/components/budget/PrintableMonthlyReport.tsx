@@ -1,3 +1,4 @@
+import { getCurrentBudgetMonth } from '../../lib/budgetMonth';
 import React, { useState, useMemo } from 'react';
 import {
   MonthlyBudgetSummary,
@@ -51,7 +52,7 @@ export const PrintableMonthlyReport: React.FC<PrintableMonthlyReportProps> = ({
   onClose,
 }) => {
   // Mode: specific month or 'ALL'
-  const [selectedReportPeriod, setSelectedReportPeriod] = useState<string>(monthStr || '2026-10');
+  const [selectedReportPeriod, setSelectedReportPeriod] = useState<string>(monthStr || getCurrentBudgetMonth());
 
   // Compute 1st day and last day of a month string (YYYY-MM)
   const getMonthDateRange = (mStr: string) => {

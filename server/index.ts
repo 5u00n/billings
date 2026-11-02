@@ -2167,10 +2167,10 @@ app.post('/api/budget/expenses', (req: Request, res: Response) => {
       body.linked_borrow_id || null
     );
 
-    // If payment method is Credit Card and create_borrow is not explicitly false, auto-create a borrow record
-    if (body.payment_method === 'Credit Card' && body.create_borrow !== false) {
+    // If payment method is Credit Card, Slice Borrow, or Amazon Borrow and create_borrow is not explicitly false, auto-create a borrow record
+    if (['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(body.payment_method) && body.create_borrow !== false) {
       const borrowId = `borrow-cc-${id}`;
-      const personName = (body.borrow_entity && String(body.borrow_entity).trim()) || 'Credit Card';
+      const personName = (body.borrow_entity && String(body.borrow_entity).trim()) || body.payment_method;
       try {
         db.prepare(`
           INSERT OR REPLACE INTO borrow_records (id, date, month, type, person, reason, amount, status)
@@ -2180,11 +2180,11 @@ app.post('/api/budget/expenses', (req: Request, res: Response) => {
           date,
           month,
           personName,
-          `Credit Card: ${body.description.trim()}`,
+          `${body.payment_method}: ${body.description.trim()}`,
           amount
         );
       } catch (bErr) {
-        console.error('Failed to auto-create credit card borrow record:', bErr);
+        console.error('Failed to auto-create borrow record:', bErr);
       }
     }
 
@@ -2275,7 +2275,7 @@ app.post('/api/budget/expenses/batch', (req: Request, res: Response) => {
           b.linked_borrow_id || null
         );
 
-        if (b.payment_method === 'Credit Card') {
+        if (['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(b.payment_method)) {
           try {
             db.prepare(`
               INSERT OR REPLACE INTO borrow_records (id, date, month, type, person, reason, amount, status)
@@ -2284,8 +2284,8 @@ app.post('/api/budget/expenses/batch', (req: Request, res: Response) => {
               `borrow-cc-${id}`,
               date,
               month,
-              'Credit Card',
-              `Credit Card: ${String(b.description).trim()}`,
+              (b.borrow_entity && String(b.borrow_entity).trim()) || b.payment_method,
+              `${b.payment_method}: ${String(b.description).trim()}`,
               amount
             );
           } catch (e) {}
@@ -2344,14 +2344,15 @@ app.put('/api/budget/expenses/:id', (req: Request, res: Response) => {
       req.params.id
     );
 
-    // Sync credit card borrow if exists
+    // Sync credit card / slice borrow / amazon borrow if exists
     try {
       const ccBorrow: any = db.prepare('SELECT id FROM borrow_records WHERE id = ?').get(`borrow-cc-${req.params.id}`);
       if (ccBorrow) {
+        const borrowPrefix = body.payment_method || 'Credit Card';
         db.prepare(`
           UPDATE borrow_records SET date = ?, month = ?, amount = ?, reason = ?
           WHERE id = ?
-        `).run(date, month, Number(body.amount) || 0, `Credit Card: ${String(body.description).trim()}`, ccBorrow.id);
+        `).run(date, month, Number(body.amount) || 0, `${borrowPrefix}: ${String(body.description).trim()}`, ccBorrow.id);
       }
     } catch (e) {}
 
@@ -2779,16 +2780,16 @@ app.post('/api/budget/goals/:id/complete', (req: Request, res: Response) => {
         notes || `Asset acquired / Financial Goal completed: ${goal.name}`
       );
 
-      // If paid via Credit Card, also auto-create pending borrow liability
-      if (expMethod === 'Credit Card') {
+      // If paid via Credit Card, Slice Borrow, or Amazon Borrow, also auto-create pending borrow liability
+      if (['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(expMethod)) {
         const borrowId = `borrow-cc-${createdExpenseId}`;
         try {
           db.prepare(`
             INSERT INTO borrow_records (id, date, month, type, person, reason, amount, status)
-            VALUES (?, ?, ?, 'BORROW', 'Credit Card', ?, ?, 'PENDING')
-          `).run(borrowId, finalDate, finalMonth, `Credit Card: ${desc}`, finalSpent);
+            VALUES (?, ?, ?, 'BORROW', ?, ?, ?, 'PENDING')
+          `).run(borrowId, finalDate, finalMonth, expMethod, `${expMethod}: ${desc}`, finalSpent);
         } catch (bErr) {
-          console.error('Failed to auto-create borrow for CC goal purchase:', bErr);
+          console.error('Failed to auto-create borrow for goal purchase:', bErr);
         }
       }
 

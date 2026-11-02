@@ -264,6 +264,9 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
     setDescription(exp.description);
     setAmount(exp.amount);
     setPaymentMethod(exp.payment_method || 'UPI / Bank');
+    if (['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(exp.payment_method || '')) {
+      setBorrowEntity(exp.payment_method!);
+    }
     setNotes(exp.notes || '');
     if (exp.tag?.toLowerCase().includes('debt') || exp.tag?.toLowerCase().includes('payback') || exp.linked_borrow_id) {
       setEntryMode('PAYBACK');
@@ -325,9 +328,9 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
           payload.payback_person = newPaybackPerson.trim();
         }
       } else {
-        if (paymentMethod === 'Credit Card') {
+        if (['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(paymentMethod)) {
           payload.create_borrow = createCcBorrow;
-          payload.borrow_entity = borrowEntity.trim() || 'Credit Card';
+          payload.borrow_entity = borrowEntity.trim() || paymentMethod;
         }
       }
 
@@ -604,6 +607,16 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
                           <CreditCard className="w-3 h-3 text-amber-600 dark:text-amber-400" />
                           Credit Card
+                        </span>
+                      ) : exp.payment_method === 'Slice Borrow' ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                          <CreditCard className="w-3 h-3 text-purple-600 dark:text-purple-400" />
+                          Slice Borrow
+                        </span>
+                      ) : exp.payment_method === 'Amazon Borrow' ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-orange-50 dark:bg-orange-950/60 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800">
+                          <CreditCard className="w-3 h-3 text-orange-600 dark:text-orange-400" />
+                          Amazon Borrow
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1">
@@ -994,28 +1007,68 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
                     <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Payment Method</label>
                     <select
                       value={paymentMethod}
-                      onChange={(e) => setPaymentMethod(e.target.value)}
+                      onChange={(e) => {
+                        const nextMethod = e.target.value;
+                        setPaymentMethod(nextMethod);
+                        if (['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(nextMethod)) {
+                          if (!borrowEntity || ['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(borrowEntity)) {
+                            setBorrowEntity(nextMethod);
+                          }
+                        }
+                      }}
                       className="w-full px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 bg-white dark:bg-slate-800 text-slate-900 dark:text-white cursor-pointer"
                     >
                       <option value="UPI / Bank">UPI / Google Pay / PhonePe</option>
                       <option value="Cash">Cash</option>
-                      <option value="Credit Card">Credit Card</option>
+                      <option value="Credit Card">Credit Card (Auto-recorded as Borrow)</option>
+                      <option value="Slice Borrow">Slice Borrow (Auto-recorded as Borrow)</option>
+                      <option value="Amazon Borrow">Amazon Borrow (Auto-recorded as Borrow)</option>
                       <option value="Debit Card">Debit Card</option>
                       <option value="Net Banking">Net Banking</option>
                     </select>
                   </div>
 
-                  {/* Credit Card Liability Automation Banner */}
-                  {paymentMethod === 'Credit Card' && (
-                    <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-xl space-y-2">
+                  {/* Borrow Liability Automation Banner (Credit Card, Slice Borrow, Amazon Borrow) */}
+                  {['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(paymentMethod) && (
+                    <div className={`p-3 border rounded-xl space-y-2 ${
+                      paymentMethod === 'Slice Borrow'
+                        ? 'bg-purple-50 dark:bg-purple-950/40 border-purple-200 dark:border-purple-900/60'
+                        : paymentMethod === 'Amazon Borrow'
+                        ? 'bg-orange-50 dark:bg-orange-950/40 border-orange-200 dark:border-orange-900/60'
+                        : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900/60'
+                    }`}>
                       <div className="flex items-start gap-2">
-                        <CreditCard className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
-                        <div className="text-[11px] text-amber-800 dark:text-amber-300 leading-tight">
-                          <span className="font-bold">Credit Card Liability:</span> Since this expense is paid via Credit Card, it will automatically be recorded as an active liability under <strong>Loans & Debts (Borrow)</strong> so you can track paying it back.
+                        <CreditCard className={`w-4 h-4 mt-0.5 shrink-0 ${
+                          paymentMethod === 'Slice Borrow'
+                            ? 'text-purple-600 dark:text-purple-400'
+                            : paymentMethod === 'Amazon Borrow'
+                            ? 'text-orange-600 dark:text-orange-400'
+                            : 'text-amber-600 dark:text-amber-400'
+                        }`} />
+                        <div className={`text-[11px] leading-tight ${
+                          paymentMethod === 'Slice Borrow'
+                            ? 'text-purple-800 dark:text-purple-300'
+                            : paymentMethod === 'Amazon Borrow'
+                            ? 'text-orange-800 dark:text-orange-300'
+                            : 'text-amber-800 dark:text-amber-300'
+                        }`}>
+                          <span className="font-bold">{paymentMethod} Liability:</span> Since this expense is paid via {paymentMethod}, it will automatically be recorded as an active liability under <strong>Loans & Debts (Borrow)</strong> so you can track paying it back.
                         </div>
                       </div>
-                      <div className="flex items-center justify-between pt-1 border-t border-amber-200/60 dark:border-amber-900/40">
-                        <label className="flex items-center gap-1.5 text-xs font-semibold text-amber-900 dark:text-amber-200 cursor-pointer">
+                      <div className={`flex items-center justify-between pt-1 border-t ${
+                        paymentMethod === 'Slice Borrow'
+                          ? 'border-purple-200/60 dark:border-purple-900/40'
+                          : paymentMethod === 'Amazon Borrow'
+                          ? 'border-orange-200/60 dark:border-orange-900/40'
+                          : 'border-amber-200/60 dark:border-amber-900/40'
+                      }`}>
+                        <label className={`flex items-center gap-1.5 text-xs font-semibold cursor-pointer ${
+                          paymentMethod === 'Slice Borrow'
+                            ? 'text-purple-900 dark:text-purple-200'
+                            : paymentMethod === 'Amazon Borrow'
+                            ? 'text-orange-900 dark:text-orange-200'
+                            : 'text-amber-900 dark:text-amber-200'
+                        }`}>
                           <input
                             type="checkbox"
                             checked={createCcBorrow}
@@ -1028,9 +1081,15 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
                           type="text"
                           value={borrowEntity}
                           onChange={(e) => setBorrowEntity(e.target.value)}
-                          placeholder="Card entity name"
-                          className="px-2 py-0.5 text-[11px] bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-amber-300 dark:border-amber-800 rounded w-36 focus:outline-none"
-                          title="Card / Lender Entity Name"
+                          placeholder={
+                            paymentMethod === 'Slice Borrow'
+                              ? 'e.g. Slice'
+                              : paymentMethod === 'Amazon Borrow'
+                              ? 'e.g. Amazon Pay Later'
+                              : 'Card / lender entity'
+                          }
+                          className="px-2 py-0.5 text-[11px] bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-700 rounded w-40 focus:outline-none"
+                          title="Lender / Account Entity Name"
                         />
                       </div>
                     </div>

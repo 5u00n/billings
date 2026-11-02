@@ -650,6 +650,8 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
                   <option value="UPI">UPI / GPay / PhonePe</option>
                   <option value="Bank Transfer">Bank Transfer / Net Banking</option>
                   <option value="Credit Card">Credit Card (Auto-recorded as Borrow)</option>
+                  <option value="Slice Borrow">Slice Borrow (Auto-recorded as Borrow)</option>
+                  <option value="Amazon Borrow">Amazon Borrow (Auto-recorded as Borrow)</option>
                   <option value="Debit Card">Debit Card</option>
                   <option value="Cash">Cash</option>
                 </select>
@@ -674,10 +676,10 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
                   </div>
                 </label>
 
-                {purchasePaymentMethod === 'Credit Card' && logExpense && (
+                {['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(purchasePaymentMethod) && logExpense && (
                   <div className="flex items-center gap-1.5 text-[11px] text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 px-2.5 py-1.5 rounded-lg border border-purple-200 dark:border-purple-800/60">
                     <CreditCard className="w-3.5 h-3.5 shrink-0" />
-                    <span>Credit Card payment will also be auto-recorded under Loans & Debts.</span>
+                    <span>{purchasePaymentMethod} payment will also be auto-recorded under Loans & Debts.</span>
                   </div>
                 )}
               </div>

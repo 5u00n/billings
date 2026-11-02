@@ -1,3 +1,4 @@
+import { getCurrentBudgetMonth, includeCurrentBudgetMonth, useBudgetMonth } from '../../lib/budgetMonth';
 import React, { useState, useEffect } from 'react';
 import { MonthlyBreakdownTableView } from './MonthlyBreakdownTableView';
 import { FileSpreadsheet, Printer, Calendar, RefreshCw } from 'lucide-react';
@@ -10,8 +11,8 @@ interface SpreadsheetPageProps {
 }
 
 export const SpreadsheetPage: React.FC<SpreadsheetPageProps> = ({ profile }) => {
-  const [selectedMonth, setSelectedMonth] = useState<string>('2026-10');
-  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+  const [selectedMonth, setSelectedMonth] = useBudgetMonth();
+  const [availableMonths, setAvailableMonths] = useState<string[]>(() => [getCurrentBudgetMonth()]);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [summary, setSummary] = useState<MonthlyBudgetSummary | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -27,7 +28,7 @@ export const SpreadsheetPage: React.FC<SpreadsheetPageProps> = ({ profile }) => 
   const fetchMonths = async () => {
     try {
       const res = await fetch('/api/budget/months');
-      const data = await res.json();
+      const data = includeCurrentBudgetMonth(await res.json());
       if (Array.isArray(data) && data.length > 0) {
         setAvailableMonths(data);
         if (!data.includes(selectedMonth)) {
@@ -38,6 +39,10 @@ export const SpreadsheetPage: React.FC<SpreadsheetPageProps> = ({ profile }) => 
       console.error('Failed to fetch months:', err);
     }
   };
+
+  useEffect(() => {
+    setAvailableMonths((months) => includeCurrentBudgetMonth(months));
+  }, [selectedMonth]);
 
   const handleOpenPrint = async () => {
     try {

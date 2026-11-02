@@ -933,11 +933,11 @@ export default {
               b.linked_borrow_id || null
             ).run();
 
-            // Auto-create borrow record if Credit Card
-            if (b.payment_method === 'Credit Card' && b.create_borrow !== false) {
+            // Auto-create borrow record if Credit Card, Slice Borrow, or Amazon Borrow
+            if (['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(b.payment_method) && b.create_borrow !== false) {
               try {
                 const borrowId = `borrow-cc-${id}`;
-                const personName = (b.borrow_entity && String(b.borrow_entity).trim()) || 'Credit Card';
+                const personName = (b.borrow_entity && String(b.borrow_entity).trim()) || b.payment_method;
                 await db.prepare(`
                   INSERT OR REPLACE INTO borrow_records (id, date, month, type, person, reason, amount, status)
                   VALUES (?, ?, ?, 'BORROW', ?, ?, ?, 'PENDING')
@@ -946,7 +946,7 @@ export default {
                   date,
                   month,
                   personName,
-                  `Credit Card: ${String(b.description || '').trim()}`,
+                  `${b.payment_method}: ${String(b.description || '').trim()}`,
                   amount
                 ).run();
               } catch (e) {}
@@ -1013,7 +1013,7 @@ export default {
               b.linked_borrow_id || null
             ).run();
 
-            if (b.payment_method === 'Credit Card') {
+            if (['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(b.payment_method)) {
               try {
                 await db.prepare(`
                   INSERT OR REPLACE INTO borrow_records (id, date, month, type, person, reason, amount, status)
@@ -1022,8 +1022,8 @@ export default {
                   `borrow-cc-${id}`,
                   date,
                   month,
-                  'Credit Card',
-                  `Credit Card: ${String(b.description).trim()}`,
+                  (b.borrow_entity && String(b.borrow_entity).trim()) || b.payment_method,
+                  `${b.payment_method}: ${String(b.description).trim()}`,
                   amount
                 ).run();
               } catch (e) {}
@@ -1070,10 +1070,11 @@ export default {
             try {
               const ccBorrow: any = await db.prepare('SELECT id FROM borrow_records WHERE id = ?').bind(`borrow-cc-${id}`).first();
               if (ccBorrow) {
+                const borrowPrefix = b.payment_method || 'Credit Card';
                 await db.prepare(`
                   UPDATE borrow_records SET date = ?, month = ?, amount = ?, reason = ?
                   WHERE id = ?
-                `).bind(date, month, Number(b.amount) || 0, `Credit Card: ${String(b.description).trim()}`, ccBorrow.id).run();
+                `).bind(date, month, Number(b.amount) || 0, `${borrowPrefix}: ${String(b.description).trim()}`, ccBorrow.id).run();
               }
             } catch (e) {}
 
@@ -1374,12 +1375,12 @@ export default {
                 b.notes || `Asset acquired / Financial Goal completed: ${goal.name}`
               ).run();
 
-              if (expMethod === 'Credit Card') {
+              if (['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(expMethod)) {
                 try {
                   await db.prepare(`
                     INSERT INTO borrow_records (id, date, month, type, person, reason, amount, status)
-                    VALUES (?, ?, ?, 'BORROW', 'Credit Card', ?, ?, 'PENDING')
-                  `).bind(`borrow-cc-${createdExpenseId}`, finalDate, finalMonth, `Credit Card: ${desc}`, finalSpent).run();
+                    VALUES (?, ?, ?, 'BORROW', ?, ?, ?, 'PENDING')
+                  `).bind(`borrow-cc-${createdExpenseId}`, finalDate, finalMonth, expMethod, `${expMethod}: ${desc}`, finalSpent).run();
                 } catch {}
               }
             }

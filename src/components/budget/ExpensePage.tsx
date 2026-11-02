@@ -1,3 +1,4 @@
+import { getCurrentBudgetMonth, includeCurrentBudgetMonth, useBudgetMonth } from '../../lib/budgetMonth';
 import React, { useState, useEffect } from 'react';
 import { Expense } from '../../types';
 import { ExpenseLogView } from './ExpenseLogView';
@@ -5,8 +6,8 @@ import { Receipt, Calendar, ChevronDown, Plus, HandCoins } from 'lucide-react';
 import { Button } from '../ui/button';
 
 export const ExpensePage: React.FC = () => {
-  const [selectedMonth, setSelectedMonth] = useState<string>('2026-10');
-  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+  const [selectedMonth, setSelectedMonth] = useBudgetMonth();
+  const [availableMonths, setAvailableMonths] = useState<string[]>(() => [getCurrentBudgetMonth()]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
@@ -17,6 +18,7 @@ export const ExpensePage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    setAvailableMonths((months) => includeCurrentBudgetMonth(months));
     if (selectedMonth) {
       loadExpenses(selectedMonth);
     }
@@ -26,14 +28,14 @@ export const ExpensePage: React.FC = () => {
     try {
       const res = await fetch('/api/budget/months');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const data = includeCurrentBudgetMonth(await res.json());
       if (Array.isArray(data) && data.length > 0) {
         setAvailableMonths(data);
         if (selectedMonth !== 'all' && !data.includes(selectedMonth)) {
           setSelectedMonth(data[0]);
         }
       } else {
-        const currentM = new Date().toISOString().substring(0, 7);
+        const currentM = getCurrentBudgetMonth();
         setAvailableMonths([currentM]);
         if (selectedMonth !== 'all') {
           setSelectedMonth(currentM);

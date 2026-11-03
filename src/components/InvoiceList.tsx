@@ -17,12 +17,19 @@ import {
   Building2,
   X,
   CreditCard,
+  FileText,
+  Banknote,
+  ArrowUpDown,
 } from 'lucide-react';
 import { InvoicePreview } from './InvoicePreview';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
 import { Card, CardContent } from './ui/card';
+import { DistinctDropdownFilter, DistinctFilterOption } from './common/DistinctDropdownFilter';
+import { FilterChipsBar, ActiveFilterChip } from './common/FilterChipsBar';
+import { ExportActions } from './common/ExportActions';
+import { ExportColumn, formatCurrencyForPdf } from '../utils/dataExport';
 
 interface InvoiceListProps {
   invoices: Invoice[];
@@ -51,21 +58,222 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   const [selectedOrg, setSelectedOrg] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
+  const [selectedAmountBand, setSelectedAmountBand] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<string>('date_desc');
   const [previewingInvoice, setPreviewingInvoice] = useState<Invoice | null>(null);
   const [paymentModalInvoice, setPaymentModalInvoice] = useState<Invoice | null>(null);
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
 
-  const filtered = invoices.filter((inv) => {
-    const matchesSearch =
-      inv.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (inv.organization?.name && inv.organization.name.toLowerCase().includes(searchTerm.toLowerCase()));
+  // Distinct organization options with invoice counts
+  const orgCounts = invoices.reduce((acc, inv) => {
+    if (inv.organization_id) acc[inv.organization_id] = (acc[inv.organization_id] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
 
-    const matchesOrg = selectedOrg === 'all' || inv.organization_id === selectedOrg;
-    const matchesType = selectedType === 'all' || inv.doc_type === selectedType;
-    const matchesStatus = selectedStatus === 'all' || inv.status === selectedStatus;
+  const orgOptions: DistinctFilterOption[] = organizations.map((org) => ({
+    value: org.id,
+    label: org.name,
+    count: orgCounts[org.id] || 0,
+  }));
 
-    return matchesSearch && matchesOrg && matchesType && matchesStatus;
-  });
+  // Distinct document types with counts
+  const docTypeCounts = invoices.reduce((acc, inv) => {
+    if (inv.doc_type) acc[inv.doc_type] = (acc[inv.doc_type] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const docTypeOptions: DistinctFilterOption[] = [
+    { value: 'BILL OF SUPPLY', label: 'Bill of Supply', count: docTypeCounts['BILL OF SUPPLY'] || 0 },
+    { value: 'INVOICE', label: 'Standard Invoice', count: docTypeCounts['INVOICE'] || 0 },
+    { value: 'ESTIMATE', label: 'Estimate', count: docTypeCounts['ESTIMATE'] || 0 },
+    { value: 'PROFORMA', label: 'Proforma', count: docTypeCounts['PROFORMA'] || 0 },
+    { value: 'RECEIPT', label: 'Receipt', count: docTypeCounts['RECEIPT'] || 0 },
+  ].filter((opt) => opt.count! > 0 || docTypeCounts[opt.value] !== undefined);
+
+  // Distinct status options with counts
+  const statusCounts = invoices.reduce((acc, inv) => {
+    acc[inv.status] = (acc[inv.status] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const statusOptions: DistinctFilterOption[] = [
+    { value: 'issued', label: 'Issued', count: statusCounts['issued'] || 0 },
+    { value: 'paid', label: 'Paid', count: statusCounts['paid'] || 0 },
+    { value: 'draft', label: 'Draft', count: statusCounts['draft'] || 0 },
+    { value: 'overdue', label: 'Overdue', count: statusCounts['overdue'] || 0 },
+  ];
+
+  // Amount band options with counts
+  const amountBandOptions: DistinctFilterOption[] = [
+    { value: 'under_10k', label: 'Under ₹10,000', count: invoices.filter((i) => i.total < 10000).length },
+    { value: '10k_50k', label: '₹10,000 – ₹50,000', count: invoices.filter((i) => i.total >= 10000 && i.total <= 50000).length },
+    { value: '50k_200k', label: '₹50,000 – ₹2,00,000', count: invoices.filter((i) => i.total > 50000 && i.total <= 200000).length },
+    { value: 'above_200k', label: 'Above ₹2,00,000', count: invoices.filter((i) => i.total > 200000).length },
+  ];
+
+  const sortOptions: DistinctFilterOption[] = [
+    { value: 'date_desc', label: 'Date: Newest First' },
+    { value: 'date_asc', label: 'Date: Oldest First' },
+    { value: 'amount_desc', label: 'Total: High to Low' },
+    { value: 'amount_asc', label: 'Total: Low to High' },
+  ];
+
+  const filtered = invoices
+    .filter((inv) => {
+      const matchesSearch =
+        searchTerm.trim() === '' ||
+        inv.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (inv.organization?.name && inv.organization.name.toLowerCase().includes(searchTerm.toLowerCase()));
+
+      const matchesOrg = selectedOrg === 'all' || inv.organization_id === selectedOrg;
+      const matchesType = selectedType === 'all' || inv.doc_type === selectedType;
+      const matchesStatus = selectedStatus === 'all' || inv.status === selectedStatus;
+
+      // Amount bands
+      if (selectedAmountBand === 'under_10k' && inv.total >= 10000) return false;
+      if (selectedAmountBand === '10k_50k' && (inv.total < 10000 || inv.total > 50000)) return false;
+      if (selectedAmountBand === '50k_200k' && (inv.total < 50000 || inv.total > 200000)) return false;
+      if (selectedAmountBand === 'above_200k' && inv.total <= 200000) return false;
+
+      return matchesSearch && matchesOrg && matchesType && matchesStatus;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'date_asc') return (a.invoice_date || '').localeCompare(b.invoice_date || '');
+      if (sortBy === 'amount_desc') return b.total - a.total;
+      if (sortBy === 'amount_asc') return a.total - b.total;
+      return (b.invoice_date || '').localeCompare(a.invoice_date || '');
+    });
+
+  // Active filter chips
+  const activeChips: ActiveFilterChip[] = [];
+  if (selectedOrg !== 'all') {
+    const org = organizations.find((o) => o.id === selectedOrg);
+    activeChips.push({
+      key: 'org',
+      label: 'Client',
+      valueDisplay: org ? org.name : selectedOrg,
+      onRemove: () => setSelectedOrg('all'),
+    });
+  }
+  if (selectedType !== 'all') {
+    activeChips.push({
+      key: 'type',
+      label: 'Type',
+      valueDisplay: selectedType,
+      onRemove: () => setSelectedType('all'),
+    });
+  }
+  if (selectedStatus !== 'all') {
+    activeChips.push({
+      key: 'status',
+      label: 'Status',
+      valueDisplay: selectedStatus.toUpperCase(),
+      onRemove: () => setSelectedStatus('all'),
+    });
+  }
+  if (selectedAmountBand !== 'all') {
+    const opt = amountBandOptions.find((o) => o.value === selectedAmountBand);
+    activeChips.push({
+      key: 'amount',
+      label: 'Amount',
+      valueDisplay: opt ? opt.label : selectedAmountBand,
+      onRemove: () => setSelectedAmountBand('all'),
+    });
+  }
+  if (searchTerm.trim()) {
+    activeChips.push({
+      key: 'search',
+      label: 'Search',
+      valueDisplay: `"${searchTerm.trim()}"`,
+      onRemove: () => setSearchTerm(''),
+    });
+  }
+
+  const handleClearAllFilters = () => {
+    setSelectedOrg('all');
+    setSelectedType('all');
+    setSelectedStatus('all');
+    setSelectedAmountBand('all');
+    setSearchTerm('');
+  };
+
+  const totalInvoiced = filtered.reduce((sum, inv) => sum + (inv.total || 0), 0);
+  const totalPaid = filtered.reduce((sum, inv) => sum + (inv.amount_paid || 0), 0);
+  const totalDue = Math.max(0, totalInvoiced - totalPaid);
+
+  const exportColumns: ExportColumn<Invoice>[] = [
+    { header: 'Invoice #', key: 'invoice_number', width: 14, align: 'center' },
+    {
+      header: 'Type',
+      key: 'invoice_type',
+      width: 14,
+      align: 'center',
+      format: (val) => val || 'Bill of Supply',
+    },
+    { header: 'Date', key: 'invoice_date', width: 12, align: 'center' },
+    {
+      header: 'Due Date',
+      key: 'due_date',
+      width: 12,
+      align: 'center',
+      format: (val) => val || '-',
+    },
+    {
+      header: 'Client / Organization',
+      key: 'organization_id',
+      width: 26,
+      align: 'left',
+      format: (id) => organizations.find((o) => o.id === id)?.name || id || 'Individual / Walk-in',
+    },
+    {
+      header: 'Status',
+      key: 'status',
+      width: 12,
+      align: 'center',
+      format: (val) => String(val || 'draft').toUpperCase(),
+    },
+    {
+      header: 'Paid Amount',
+      key: 'amount_paid',
+      width: 15,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val || 0),
+    },
+    {
+      header: 'Total Amount',
+      key: 'total',
+      width: 16,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Balance Due',
+      key: 'balance_due',
+      width: 16,
+      align: 'right',
+      isNumeric: true,
+      format: (_, inv) => Math.max(0, inv.total - (inv.amount_paid || 0)),
+      formatPdf: (_, inv) => formatCurrencyForPdf(Math.max(0, inv.total - (inv.amount_paid || 0))),
+    },
+  ];
+
+  const exportOptions = {
+    filename: `Invoices_Ledger_${new Date().toISOString().slice(0, 10)}`,
+    title: 'Invoices & Billing Records Report',
+    subtitle: `Exported ${filtered.length} invoice records matching applied filters`,
+    sheetName: 'Invoices',
+    columns: exportColumns,
+    data: filtered,
+    profile,
+    summaryMetrics: [
+      { label: 'Total Invoiced', value: formatCurrencyForPdf(totalInvoiced) },
+      { label: 'Total Collected', value: formatCurrencyForPdf(totalPaid) },
+      { label: 'Total Due', value: formatCurrencyForPdf(totalDue) },
+      { label: 'Bills Exported', value: `${filtered.length} of ${invoices.length}` },
+    ],
+  };
 
   const getStatusBadge = (status: Invoice['status']) => {
     switch (status) {
@@ -103,18 +311,21 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
             Issued bills of supply, standard invoices, estimates, and payment tracking.
           </p>
         </div>
-        <Button
-          onClick={onNewInvoice}
-          className="gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-xs"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Bill</span>
-        </Button>
+        <div className="flex items-center gap-2">
+          <ExportActions exportOptions={exportOptions} size="default" />
+          <Button
+            onClick={onNewInvoice}
+            className="gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-xs"
+          >
+            <Plus className="w-4 h-4" />
+            <span>New Bill</span>
+          </Button>
+        </div>
       </div>
 
-      {/* Filters Bar with Tailwind & shadcn Inputs */}
-      <Card className="p-3 shadow-2xs">
-        <div className="flex flex-wrap items-center gap-3">
+      {/* Filters Bar with Distinct Dropdown Filters */}
+      <Card className="p-3 shadow-2xs space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           {/* Search Box */}
           <div className="relative flex-1 min-w-[220px]">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -123,59 +334,75 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search by invoice # or client organization..."
-              className="pl-8 text-xs h-9 bg-slate-50/50"
+              className="pl-8 text-xs h-8 bg-slate-50/50"
             />
           </div>
 
-          {/* Org Filter */}
-          <div className="flex items-center gap-1.5 text-xs">
-            <Building2 className="w-3.5 h-3.5 text-slate-400" />
-            <select
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Org Filter */}
+            <DistinctDropdownFilter
+              label="Client"
+              icon={Building2}
               value={selectedOrg}
-              onChange={(e) => setSelectedOrg(e.target.value)}
-              className="h-9 border border-slate-200 rounded-lg px-2.5 bg-slate-50 text-slate-700 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="all">All Organizations</option>
-              {organizations.map((org) => (
-                <option key={org.id} value={org.id}>
-                  {org.name}
-                </option>
-              ))}
-            </select>
-          </div>
+              onChange={setSelectedOrg}
+              options={orgOptions}
+              allLabel="All Clients"
+            />
 
-          {/* Type Filter */}
-          <div className="flex items-center gap-1.5 text-xs">
-            <Filter className="w-3.5 h-3.5 text-slate-400" />
-            <select
+            {/* Type Filter */}
+            <DistinctDropdownFilter
+              label="Type"
+              icon={FileText}
               value={selectedType}
-              onChange={(e) => setSelectedType(e.target.value)}
-              className="h-9 border border-slate-200 rounded-lg px-2.5 bg-slate-50 text-slate-700 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="all">All Document Types</option>
-              <option value="BILL OF SUPPLY">Bill of Supply</option>
-              <option value="INVOICE">Standard Invoice</option>
-              <option value="ESTIMATE">Estimate</option>
-              <option value="PROFORMA">Proforma</option>
-              <option value="RECEIPT">Receipt</option>
-            </select>
-          </div>
+              onChange={setSelectedType}
+              options={docTypeOptions}
+              allLabel="All Types"
+            />
 
-          {/* Status Filter */}
-          <div className="flex items-center gap-1.5 text-xs">
-            <select
+            {/* Status Filter */}
+            <DistinctDropdownFilter
+              label="Status"
+              icon={CreditCard}
               value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
-              className="h-9 border border-slate-200 rounded-lg px-2.5 bg-slate-50 text-slate-700 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="all">All Statuses</option>
-              <option value="issued">Issued</option>
-              <option value="paid">Paid</option>
-              <option value="draft">Draft</option>
-              <option value="overdue">Overdue</option>
-            </select>
+              onChange={setSelectedStatus}
+              options={statusOptions}
+              allLabel="All Statuses"
+            />
+
+            {/* Amount Band Filter */}
+            <DistinctDropdownFilter
+              label="Amount"
+              icon={Banknote}
+              value={selectedAmountBand}
+              onChange={setSelectedAmountBand}
+              options={amountBandOptions}
+              allLabel="Any Amount"
+            />
+
+            {/* Sort Filter */}
+            <DistinctDropdownFilter
+              label="Sort"
+              icon={ArrowUpDown}
+              value={sortBy}
+              onChange={setSortBy}
+              options={sortOptions}
+              allLabel="Date: Newest"
+              align="right"
+            />
+
+            {/* Export Actions (Excel & PDF) */}
+            <ExportActions exportOptions={exportOptions} />
           </div>
         </div>
+
+        {/* Active Chips & Counter */}
+        <FilterChipsBar
+          chips={activeChips}
+          onClearAll={handleClearAllFilters}
+          filteredCount={filtered.length}
+          totalCount={invoices.length}
+          itemNoun="invoices"
+        />
       </Card>
 
       {/* Invoices Data Table */}

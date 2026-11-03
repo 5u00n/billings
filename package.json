@@ -12,7 +12,9 @@
     "deploy": "npm run build && wrangler deploy",
     "start": "tsx server/index.ts",
     "test:borrowing": "node --import tsx tests/borrowing.test.ts",
-    "test:borrowing:d1": "node scripts/test-borrowing-d1.mjs"
+    "test:borrowing:d1": "node scripts/test-borrowing-d1.mjs",
+    "test:diagnostics": "node --import tsx tests/diagnostics.test.ts",
+    "db:pull": "node scripts/pull-d1-to-local.mjs"
   },
   "keywords": [],
   "author": "",

@@ -1,5 +1,7 @@
 import { borrowingRouter } from './borrowing/router';
 import { d1Store } from './borrowing/store';
+import { runDiagnostics, executeRepair } from './admin/diagnostics';
+import { createEntityId } from './utils/id';
 export interface D1Result<T = any> {
   results: T[];
   success: boolean;
@@ -200,6 +202,52 @@ async function ensureD1Migrations(db: D1Database): Promise<void> {
     'ALTER TABLE financial_goals ADD COLUMN spent_amount REAL DEFAULT 0',
     'ALTER TABLE financial_goals ADD COLUMN completed_date TEXT',
     'ALTER TABLE financial_goals ADD COLUMN linked_expense_id TEXT',
+    `CREATE TABLE IF NOT EXISTS contacts (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'PERSON',
+      phone TEXT,
+      email TEXT,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS financial_accounts (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      account_number_mask TEXT,
+      institution_name TEXT,
+      is_active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS expense_categories (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      lifestyle_bucket TEXT NOT NULL DEFAULT 'REGULAR',
+      tax_treatment TEXT DEFAULT 'BUSINESS_DEDUCTIBLE',
+      icon TEXT,
+      color TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS debt_repayments (
+      id TEXT PRIMARY KEY,
+      date TEXT NOT NULL,
+      month TEXT NOT NULL,
+      borrow_id TEXT,
+      from_account_id TEXT,
+      amount REAL NOT NULL,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS invoice_items (
+      id TEXT PRIMARY KEY,
+      invoice_id TEXT NOT NULL,
+      catalog_item_id TEXT,
+      description TEXT NOT NULL,
+      qty REAL NOT NULL DEFAULT 1,
+      rate REAL NOT NULL,
+      amount REAL NOT NULL,
+      sort_order INTEGER DEFAULT 0
+    )`,
   ];
 
   for (const sql of migrations) {
@@ -313,6 +361,30 @@ export default {
           });
         }
 
+        // --- ADMIN DIAGNOSTICS & CLOUDFLARE D1 REPAIR ---
+        if (url.pathname === '/api/admin/diagnostics' && method === 'GET') {
+          try {
+            const report = await runDiagnostics(db);
+            return jsonResponse(report);
+          } catch (err: any) {
+            return errorResponse(err.message || 'Diagnostics failed', 500);
+          }
+        }
+
+        if (url.pathname === '/api/admin/repair' && method === 'POST') {
+          try {
+            const b = ((await request.json()) || {}) as any;
+            const { action, dryRun } = b;
+            if (!['reconcile_ledger', 'clean_orphans', 'migrate_ids', 'reset_expense_data'].includes(action)) {
+              return errorResponse('Valid action parameter (reconcile_ledger, clean_orphans, migrate_ids, reset_expense_data) is required', 400);
+            }
+            const result = await executeRepair(db, action, Boolean(dryRun));
+            return jsonResponse(result);
+          } catch (err: any) {
+            return errorResponse(err.message || 'Repair operation failed', 500);
+          }
+        }
+
         // --- INVOICES ---
         if (url.pathname === '/api/invoices/next-number' && method === 'GET') {
           const type = url.searchParams.get('type') || 'BILL OF SUPPLY';
@@ -382,7 +454,7 @@ export default {
 
         if (url.pathname === '/api/invoices' && method === 'POST') {
           const b = (await request.json()) as any;
-          const id = b.id || crypto.randomUUID();
+          const id = b.id || createEntityId('inv');
           await db.prepare(`
             INSERT INTO invoices (
               id, invoice_number, doc_type, organization_id, invoice_date, terms, due_date,
@@ -408,6 +480,28 @@ export default {
             b.copy_type || 'ORIGINAL',
             b.hide_qty ? 1 : 0
           ).run();
+
+          if (Array.isArray(b.items)) {
+            for (let idx = 0; idx < b.items.length; idx++) {
+              const item = b.items[idx];
+              try {
+                await db.prepare(`
+                  INSERT INTO invoice_items (id, invoice_id, catalog_item_id, description, qty, rate, amount, sort_order)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                `).bind(
+                  item.id || createEntityId('itm'),
+                  id,
+                  item.catalog_item_id || null,
+                  item.description || '',
+                  item.qty || 1,
+                  item.rate || 0,
+                  item.amount || (Number(item.qty || 1) * Number(item.rate || 0)),
+                  idx
+                ).run();
+              } catch {}
+            }
+          }
+
           return jsonResponse({ id, success: true }, 201);
         }
 
@@ -456,12 +550,24 @@ export default {
         // --- ORGANIZATIONS ---
         if (url.pathname === '/api/organizations') {
           if (method === 'GET') {
-            const { results } = await db.prepare('SELECT * FROM organizations ORDER BY name ASC').all();
+            const query = `
+              SELECT 
+                o.*,
+                COALESCE(COUNT(i.id), 0) as invoices_count,
+                COALESCE(SUM(i.total), 0) as total_invoiced,
+                COALESCE(SUM(i.amount_paid), 0) as total_paid,
+                COALESCE(SUM(i.balance_due), 0) as balance_due
+              FROM organizations o
+              LEFT JOIN invoices i ON i.organization_id = o.id
+              GROUP BY o.id
+              ORDER BY o.name ASC
+            `;
+            const { results } = await db.prepare(query).all();
             return jsonResponse(results);
           }
           if (method === 'POST') {
             const b = (await request.json()) as any;
-            const id = b.id || crypto.randomUUID();
+            const id = b.id || createEntityId('org');
             await db.prepare(`
               INSERT INTO organizations (id, name, address, city, state, pincode, country, phone, email, notes)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -472,6 +578,39 @@ export default {
 
         if (url.pathname.startsWith('/api/organizations/')) {
           const id = url.pathname.replace('/api/organizations/', '');
+          if (method === 'GET') {
+            const org = await db.prepare('SELECT * FROM organizations WHERE id = ?').bind(id).first();
+            if (!org) return errorResponse('Organization not found', 404);
+
+            const { results: invoicesRows } = await db
+              .prepare('SELECT * FROM invoices WHERE organization_id = ? ORDER BY created_at DESC')
+              .bind(id)
+              .all();
+
+            const invoices = (invoicesRows || []).map((r: any) => mapInvoiceRow(r, org));
+
+            const stats: any = await db
+              .prepare(`
+                SELECT 
+                  COUNT(*) as invoices_count,
+                  COALESCE(SUM(total), 0) as total_invoiced,
+                  COALESCE(SUM(amount_paid), 0) as total_paid,
+                  COALESCE(SUM(balance_due), 0) as balance_due
+                FROM invoices
+                WHERE organization_id = ?
+              `)
+              .bind(id)
+              .first();
+
+            return jsonResponse({
+              ...org,
+              invoices_count: stats?.invoices_count || 0,
+              total_invoiced: stats?.total_invoiced || 0,
+              total_paid: stats?.total_paid || 0,
+              balance_due: stats?.balance_due || 0,
+              invoices,
+            });
+          }
           if (method === 'PUT') {
             const b = (await request.json()) as any;
             await db.prepare(`
@@ -524,7 +663,7 @@ export default {
           }
           if (method === 'POST') {
             const b = (await request.json()) as any;
-            const id = b.id || crypto.randomUUID();
+            const id = b.id || createEntityId('inc');
             await db.prepare('INSERT INTO catalog_items (id, name, description, default_rate) VALUES (?, ?, ?, ?)').bind(id, b.name, b.description || '', b.default_rate).run();
             return jsonResponse({ id, success: true }, 201);
           }
@@ -694,13 +833,16 @@ export default {
               const extSavings = Number(summary.ext_savings) || 0;
               const deptPayment = Number(summary.dept_payment) || 0;
 
-              const overhead = (totalIncome + finalBorrow) - (totalExpense + deptPayment);
+              const cashBeforeSavings = (totalIncome + finalBorrow) - (totalExpense + deptPayment);
+              const overhead = Math.max(0, cashBeforeSavings);
+              const manualSavings = regSavings + extSavings;
+              const netCash = cashBeforeSavings - manualSavings;
+              const cashShortfall = Math.max(0, -netCash);
+              const remaining = Math.max(0, netCash);
               const ovhSavings = overhead > 0 ? Math.round(overhead / 2) : 0;
-              const totalSavings = regSavings + extSavings + ovhSavings;
-              const remaining = overhead > 0 ? (overhead - ovhSavings) : 0;
+              const totalSavings = manualSavings + ovhSavings;
 
-              const deficit = totalExpense > totalIncome ? totalExpense - totalIncome : 0;
-              const endingDebt = (startingDebt - deptPayment) + finalBorrow + deficit;
+              const endingDebt = (startingDebt - deptPayment) + finalBorrow + cashShortfall;
 
               carryEndingDebt = endingDebt;
               carryRemaining = remaining;
@@ -733,6 +875,37 @@ export default {
             return jsonResponse(breakdown);
           } catch (err: any) {
             return errorResponse(err.message || 'Failed to calculate monthly breakdown', 500);
+          }
+        }
+
+        // --- BUDGET LIMITS & TARGETS ---
+        if (url.pathname === '/api/budget/limits') {
+          if (method === 'GET') {
+            const month = url.searchParams.get('month') || new Date().toISOString().substring(0, 7);
+            const row = await db.prepare('SELECT * FROM monthly_budget_limits WHERE month = ?').bind(month).first();
+            if (!row) {
+              return jsonResponse({ month, regular_budget: 20000, extra_budget: 10000, total_budget: 30000 });
+            }
+            return jsonResponse(row);
+          }
+          if (method === 'POST') {
+            const b = (await request.json()) as any;
+            const month = b.month || new Date().toISOString().substring(0, 7);
+            const reg = Number(b.regular_budget) || 0;
+            const ext = Number(b.extra_budget) || 0;
+            const tot = Number(b.total_budget) || (reg + ext);
+            const notes = b.notes || '';
+            await db.prepare(`
+              INSERT INTO monthly_budget_limits (month, regular_budget, extra_budget, total_budget, notes, updated_at)
+              VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+              ON CONFLICT(month) DO UPDATE SET
+                regular_budget = excluded.regular_budget,
+                extra_budget = excluded.extra_budget,
+                total_budget = excluded.total_budget,
+                notes = excluded.notes,
+                updated_at = CURRENT_TIMESTAMP
+            `).bind(month, reg, ext, tot, notes).run();
+            return jsonResponse({ success: true, month, total_budget: tot });
           }
         }
 
@@ -832,11 +1005,15 @@ export default {
 
           const totalIncomeEarned = salary + freelance + returns + extIncome;
           const totalInflow = previousRemaining + totalIncomeEarned;
-          const overhead = (totalInflow + finalBorrow) - (totalExpense + debtPayment);
+          const cashBeforeSavings = (totalInflow + finalBorrow) - (totalExpense + debtPayment);
+          const overhead = Math.max(0, cashBeforeSavings);
+          const manualSavings = regSavings + extSavings;
+          const netCash = cashBeforeSavings - manualSavings;
+          const cashShortfall = Math.max(0, -netCash);
+          const remaining = Math.max(0, netCash);
           const overheadSavings = overhead > 0 ? Math.round(overhead / 2) : 0;
-          const totalSavings = regSavings + extSavings + overheadSavings;
-          const remaining = overhead - overheadSavings;
-          const endingDebt = startingDebt + finalBorrow - debtPayment;
+          const totalSavings = manualSavings + overheadSavings;
+          const endingDebt = (startingDebt - debtPayment) + finalBorrow + cashShortfall;
 
           const summary = {
             month: m,
@@ -912,7 +1089,7 @@ export default {
           }
           if (method === 'POST') {
             const b = (await request.json()) as any;
-            const id = b.id || crypto.randomUUID();
+            const id = b.id || createEntityId('exp');
             const date = (b.date && typeof b.date === 'string' && b.date.trim())
               ? b.date.trim()
               : new Date().toISOString().split('T')[0];
@@ -1110,7 +1287,7 @@ export default {
           }
           if (method === 'POST') {
             const b = (await request.json()) as any;
-            const id = b.id || crypto.randomUUID();
+            const id = b.id || createEntityId('inc');
             const date = (b.date && typeof b.date === 'string' && b.date.trim())
               ? b.date.trim()
               : new Date().toISOString().split('T')[0];
@@ -1186,7 +1363,7 @@ export default {
               if (!person || isNaN(amount) || amount <= 0) {
                 return errorResponse('Person and a valid amount greater than 0 are required', 400);
               }
-              const id = b.id || crypto.randomUUID();
+              const id = b.id || createEntityId('brw');
               const date = (b.date && typeof b.date === 'string' && b.date.trim())
                 ? b.date.trim().substring(0, 10)
                 : new Date().toISOString().split('T')[0];
@@ -1330,7 +1507,7 @@ export default {
           }
           if (method === 'POST') {
             const b = (await request.json()) as any;
-            const id = b.id || crypto.randomUUID();
+            const id = b.id || createEntityId('gol');
             await db.prepare(`
               INSERT INTO financial_goals (id, name, target_amount, savings_percent, saved_amount, target_date, status, spent_amount, completed_date, linked_expense_id, notes)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1653,7 +1830,7 @@ export default {
           }
           if (method === 'POST') {
             const b = (await request.json()) as any;
-            const id = b.id || crypto.randomUUID();
+            const id = b.id || createEntityId('rem');
             await db.prepare(`
               INSERT INTO tax_reminders (id, title, description, due_date, category, is_recurring, frequency, is_completed, notify_before_days, priority, penalty_note, action_url)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -2111,7 +2288,7 @@ export default {
           }
           if (method === 'POST') {
             const b = (await request.json()) as any;
-            const id = b.id || crypto.randomUUID();
+            const id = b.id || createEntityId('pps');
             await db.prepare('INSERT INTO sbi_pps_cheques (id, cheque_number, payee_name, amount, issue_date, account_number, pps_status, pps_reference, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
               .bind(id, b.cheque_number, b.payee_name, b.amount, b.issue_date, b.account_number || '45661497562', b.pps_status || 'PENDING_REGISTRATION', b.pps_reference || '', b.notes || '').run();
             return jsonResponse({ id, success: true }, 201);
@@ -2140,7 +2317,7 @@ export default {
           }
           if (method === 'POST') {
             const b = (await request.json()) as any;
-            const id = b.id || crypto.randomUUID();
+            const id = b.id || createEntityId('inv');
             await db.prepare(`
               INSERT INTO recurring_schedules (id, name, organization_id, schedule_type, doc_type, monthly_day, total_amount, milestones_json, items_json, terms, notes, status, last_run_date, next_run_date)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

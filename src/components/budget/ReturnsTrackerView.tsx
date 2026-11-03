@@ -16,8 +16,15 @@ import {
   Coins,
   Check,
   FileSpreadsheet,
+  Banknote,
+  User,
+  ArrowUpDown,
 } from 'lucide-react';
 import { DataImportModal, FieldDefinition } from '../common/DataImportModal';
+import { DistinctDropdownFilter, DistinctFilterOption } from '../common/DistinctDropdownFilter';
+import { FilterChipsBar, ActiveFilterChip } from '../common/FilterChipsBar';
+import { ExportActions } from '../common/ExportActions';
+import { ExportColumn, formatCurrencyForPdf } from '../../utils/dataExport';
 
 interface ReturnsTrackerViewProps {
   records: BorrowRecord[];
@@ -93,6 +100,9 @@ export const ReturnsTrackerView: React.FC<ReturnsTrackerViewProps> = ({
   const returnRecords = records.filter((r) => r.type === 'RETURN');
 
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDING' | 'SETTLED'>('ALL');
+  const [selectedPerson, setSelectedPerson] = useState<string>('all');
+  const [selectedAmountBand, setSelectedAmountBand] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<string>('date_desc');
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -232,24 +242,153 @@ export const ReturnsTrackerView: React.FC<ReturnsTrackerViewProps> = ({
     }
   };
 
-  const filtered = returnRecords.filter((r) => {
-    if (statusFilter !== 'ALL' && r.status !== statusFilter) return false;
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      const matchPerson = r.person.toLowerCase().includes(q);
-      const matchReason = r.reason?.toLowerCase().includes(q);
-      if (!matchPerson && !matchReason) return false;
-    }
-    return true;
-  });
+  // Dynamic distinct person options with record counts
+  const personCounts = returnRecords.reduce((acc, r) => {
+    if (r.person) acc[r.person] = (acc[r.person] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
 
-  const totalSettled = returnRecords
+  const personOptions: DistinctFilterOption[] = Object.entries(personCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([p, count]) => ({ value: p, label: p, count }));
+
+  // Amount band options with counts
+  const amountBandOptions: DistinctFilterOption[] = [
+    { value: 'under_2k', label: 'Under ₹2,000', count: returnRecords.filter((r) => r.amount < 2000).length },
+    { value: '2k_10k', label: '₹2,000 – ₹10,000', count: returnRecords.filter((r) => r.amount >= 2000 && r.amount <= 10000).length },
+    { value: 'above_10k', label: 'Above ₹10,000', count: returnRecords.filter((r) => r.amount > 10000).length },
+  ];
+
+  const sortOptions: DistinctFilterOption[] = [
+    { value: 'date_desc', label: 'Date: Newest First' },
+    { value: 'date_asc', label: 'Date: Oldest First' },
+    { value: 'amount_desc', label: 'Amount: High to Low' },
+    { value: 'amount_asc', label: 'Amount: Low to High' },
+  ];
+
+  const filtered = returnRecords
+    .filter((r) => {
+      if (statusFilter !== 'ALL' && r.status !== statusFilter) return false;
+      if (selectedPerson !== 'all' && r.person !== selectedPerson) return false;
+
+      // Amount band
+      if (selectedAmountBand === 'under_2k' && r.amount >= 2000) return false;
+      if (selectedAmountBand === '2k_10k' && (r.amount < 2000 || r.amount > 10000)) return false;
+      if (selectedAmountBand === 'above_10k' && r.amount <= 10000) return false;
+
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        const matchPerson = r.person.toLowerCase().includes(q);
+        const matchReason = r.reason?.toLowerCase().includes(q);
+        if (!matchPerson && !matchReason) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'date_asc') return a.date.localeCompare(b.date);
+      if (sortBy === 'amount_desc') return b.amount - a.amount;
+      if (sortBy === 'amount_asc') return a.amount - b.amount;
+      return b.date.localeCompare(a.date);
+    });
+
+  const totalSettled = filtered
     .filter((r) => r.status === 'SETTLED')
     .reduce((sum, r) => sum + r.amount, 0);
 
-  const totalPending = returnRecords
+  const totalPending = filtered
     .filter((r) => r.status === 'PENDING')
     .reduce((sum, r) => sum + r.amount, 0);
+
+  // Active filter chips
+  const activeChips: ActiveFilterChip[] = [];
+  if (statusFilter !== 'ALL') {
+    activeChips.push({
+      key: 'status',
+      label: 'Status',
+      valueDisplay: statusFilter === 'SETTLED' ? 'Received (Settled)' : 'Pending',
+      onRemove: () => setStatusFilter('ALL'),
+    });
+  }
+  if (selectedPerson !== 'all') {
+    activeChips.push({
+      key: 'person',
+      label: 'Person',
+      valueDisplay: selectedPerson,
+      onRemove: () => setSelectedPerson('all'),
+    });
+  }
+  if (selectedAmountBand !== 'all') {
+    const opt = amountBandOptions.find((o) => o.value === selectedAmountBand);
+    activeChips.push({
+      key: 'amount',
+      label: 'Amount',
+      valueDisplay: opt ? opt.label : selectedAmountBand,
+      onRemove: () => setSelectedAmountBand('all'),
+    });
+  }
+  if (search.trim()) {
+    activeChips.push({
+      key: 'search',
+      label: 'Search',
+      valueDisplay: `"${search.trim()}"`,
+      onRemove: () => setSearch(''),
+    });
+  }
+
+  const handleClearAllFilters = () => {
+    setStatusFilter('ALL');
+    setSelectedPerson('all');
+    setSelectedAmountBand('all');
+    setSearch('');
+  };
+
+  const returnsExportColumns: ExportColumn<BorrowRecord>[] = [
+    { header: 'Date', key: 'date', width: 12, align: 'center' },
+    { header: 'Person (Who Repaid)', key: 'person', width: 22, align: 'left' },
+    {
+      header: 'Amount Returned',
+      key: 'amount',
+      width: 16,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Status',
+      key: 'status',
+      width: 14,
+      align: 'center',
+      format: (val) => (val === 'SETTLED' ? 'Received (Settled)' : 'Pending'),
+    },
+    {
+      header: 'Settled Date',
+      key: 'settled_date',
+      width: 14,
+      align: 'center',
+      format: (val) => val || '-',
+    },
+    {
+      header: 'Notes / Settlement Reason',
+      key: 'reason',
+      width: 26,
+      align: 'left',
+      format: (val) => val || '',
+    },
+  ];
+
+  const returnsExportOptions = {
+    filename: `Returns_Tracker_${new Date().toISOString().slice(0, 10)}`,
+    title: 'Returns & Repayments Tracker Report',
+    subtitle: `Exported ${filtered.length} repayment entries matching applied filters`,
+    sheetName: 'Returns',
+    columns: returnsExportColumns,
+    data: filtered,
+    summaryMetrics: [
+      { label: 'Total Received (Inflow)', value: formatCurrencyForPdf(totalSettled) },
+      { label: 'Pending Refunds', value: formatCurrencyForPdf(totalPending) },
+      { label: 'Records Exported', value: `${filtered.length} of ${returnRecords.length}` },
+    ],
+  };
 
   // Group by person to see who repaid how much
   const personTotals = returnRecords.reduce((acc, r) => {
@@ -338,53 +477,104 @@ export const ReturnsTrackerView: React.FC<ReturnsTrackerViewProps> = ({
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-2xs flex flex-col md:flex-row items-center justify-between gap-3">
-        <div className="relative w-full md:w-80">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Search person or reason..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-          />
-        </div>
+      <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          {/* Search Box */}
+          <div className="relative w-full lg:w-72">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search person or reason..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+            />
+          </div>
 
-        <div className="flex items-center gap-2 w-full md:w-auto">
-          {/* Status filter */}
-          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300">
-            <button
-              onClick={() => setStatusFilter('ALL')}
-              className={`px-3 py-1 rounded-md transition-all cursor-pointer ${
-                statusFilter === 'ALL'
-                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-2xs font-bold'
-                  : 'hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              All Status
-            </button>
-            <button
-              onClick={() => setStatusFilter('SETTLED')}
-              className={`px-3 py-1 rounded-md transition-all cursor-pointer ${
-                statusFilter === 'SETTLED'
-                  ? 'bg-emerald-600 text-white shadow-2xs font-bold'
-                  : 'hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              Received (Settled)
-            </button>
-            <button
-              onClick={() => setStatusFilter('PENDING')}
-              className={`px-3 py-1 rounded-md transition-all cursor-pointer ${
-                statusFilter === 'PENDING'
-                  ? 'bg-amber-600 text-white shadow-2xs font-bold'
-                  : 'hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              Pending
-            </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Status filter */}
+            <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300">
+              <button
+                type="button"
+                onClick={() => setStatusFilter('ALL')}
+                className={`px-3 py-1 rounded-md transition-all cursor-pointer ${
+                  statusFilter === 'ALL'
+                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-2xs font-bold'
+                    : 'hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                All Status
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('SETTLED')}
+                className={`px-3 py-1 rounded-md transition-all cursor-pointer ${
+                  statusFilter === 'SETTLED'
+                    ? 'bg-emerald-600 text-white shadow-2xs font-bold'
+                    : 'hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Received
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('PENDING')}
+                className={`px-3 py-1 rounded-md transition-all cursor-pointer ${
+                  statusFilter === 'PENDING'
+                    ? 'bg-amber-600 text-white shadow-2xs font-bold'
+                    : 'hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Pending
+              </button>
+            </div>
+
+            {/* Distinct Person Filter */}
+            {personOptions.length > 0 && (
+              <DistinctDropdownFilter
+                label="Person"
+                icon={User}
+                value={selectedPerson}
+                onChange={setSelectedPerson}
+                options={personOptions}
+                allLabel="All Contacts"
+              />
+            )}
+
+            {/* Amount Band Filter */}
+            <DistinctDropdownFilter
+              label="Amount"
+              icon={Banknote}
+              value={selectedAmountBand}
+              onChange={setSelectedAmountBand}
+              options={amountBandOptions}
+              allLabel="Any Amount"
+            />
+
+            {/* Sort Filter */}
+            <DistinctDropdownFilter
+              label="Sort"
+              icon={ArrowUpDown}
+              value={sortBy}
+              onChange={setSortBy}
+              options={sortOptions}
+              allLabel="Date: Newest"
+              align="right"
+            />
+
+            {/* Export Actions (Excel & PDF) */}
+            <ExportActions exportOptions={returnsExportOptions} />
           </div>
         </div>
+
+        {/* Active Chips & Counter */}
+        <FilterChipsBar
+          chips={activeChips}
+          onClearAll={handleClearAllFilters}
+          filteredCount={filtered.length}
+          totalCount={returnRecords.length}
+          itemNoun="return records"
+        />
       </div>
 
       {/* Returns Table */}

@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './ui/
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
+import { CloudflareDiagnosticsCard } from './admin/CloudflareDiagnosticsCard';
 
 interface SettingsProps {
   settings: AppSettings;
@@ -678,6 +679,9 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSaveSettings, on
           </label>
         </CardContent>
       </Card>
+
+      {/* Cloudflare D1 & Database Diagnostics / Maintenance */}
+      <CloudflareDiagnosticsCard onRefreshParent={onRefresh} />
     </div>
   );
 };

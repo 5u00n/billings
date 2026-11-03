@@ -39,6 +39,8 @@ import {
   CartesianGrid,
   Legend,
 } from 'recharts';
+import { ExportActions } from '../common/ExportActions';
+import { ExportColumn, formatCurrencyForPdf } from '../../utils/dataExport';
 
 export interface MonthlyBreakdownRow {
   month: string;
@@ -374,6 +376,123 @@ export const MonthlyBreakdownTableView: React.FC<MonthlyBreakdownTableViewProps>
     return null;
   };
 
+  const monthlyExportColumns: ExportColumn<MonthlyBreakdownRow>[] = [
+    { header: 'Month', key: 'month', width: 14, align: 'center' },
+    {
+      header: 'Opening Cash',
+      key: 'previous_remaining',
+      width: 14,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Developer Salary',
+      key: 'salary',
+      width: 15,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Freelance Draws',
+      key: 'freelance',
+      width: 15,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Loans Borrowed',
+      key: 'borrow_amount',
+      width: 15,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Repayments Inflow',
+      key: 'returns',
+      width: 15,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Total Income',
+      key: 'total_income',
+      width: 16,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Regular Expenses',
+      key: 'reg_expense',
+      width: 15,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Extra Expenses',
+      key: 'ext_expense',
+      width: 15,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Total Expenses',
+      key: 'total_expense',
+      width: 15,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Debt Repaid',
+      key: 'dept_payment',
+      width: 14,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Overhead / In Hand',
+      key: 'overhead',
+      width: 16,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Ending Debt',
+      key: 'ending_debt',
+      width: 14,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+  ];
+
+  const monthlyExportOptions = {
+    filename: `Monthly_Breakdown_Ledger_${new Date().toISOString().slice(0, 10)}`,
+    title: 'Monthly Cashflow & Budget Breakdown Ledger',
+    subtitle: `Multi-month financial summary covering ${breakdown.length} months`,
+    sheetName: 'Spreadsheet',
+    columns: monthlyExportColumns,
+    data: breakdown,
+    orientation: 'landscape' as const,
+    summaryMetrics: [
+      { label: 'Total Inflow Logged', value: formatCurrencyForPdf(totalInflowAll) },
+      { label: 'Total Outflow Logged', value: formatCurrencyForPdf(totalOutflowAll) },
+      { label: 'Total Debt Repaid', value: formatCurrencyForPdf(totalDebtRepaidAll) },
+      { label: 'Net Cumulative Cashflow', value: formatCurrencyForPdf(netCumulativeCashflow) },
+      { label: 'Months Tracked', value: breakdown.length },
+    ],
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Banner & Multi-Month Stats */}
@@ -429,6 +548,9 @@ export const MonthlyBreakdownTableView: React.FC<MonthlyBreakdownTableViewProps>
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
+
+            {/* Export Actions (Excel & PDF) */}
+            <ExportActions exportOptions={monthlyExportOptions} />
           </div>
         </div>
 

@@ -7,6 +7,8 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from './ui/card';
 import { Badge } from './ui/badge';
+import { ExportActions } from './common/ExportActions';
+import { ExportColumn, formatCurrencyForPdf } from '../utils/dataExport';
 
 interface OrganizationsProps {
   organizations: Organization[];
@@ -144,6 +146,46 @@ export const Organizations: React.FC<OrganizationsProps> = ({
   const totalInvoiced = organizations.reduce((acc, o) => acc + (o.total_invoiced || 0), 0);
   const totalReceivables = organizations.reduce((acc, o) => acc + (o.balance_due || 0), 0);
 
+  const orgExportColumns: ExportColumn<Organization>[] = [
+    { header: 'Organization Name', key: 'name', width: 26, align: 'left' },
+    { header: 'Contact Person', key: 'contact_person', width: 20, align: 'left', format: (v) => v || '-' },
+    { header: 'Email', key: 'email', width: 22, align: 'left', format: (v) => v || '-' },
+    { header: 'Phone', key: 'phone', width: 16, align: 'center', format: (v) => v || '-' },
+    { header: 'City & State', key: 'city', width: 18, align: 'left', format: (_, o) => [o.city, o.state].filter(Boolean).join(', ') || '-' },
+    { header: 'GST / Tax ID', key: 'tax_id', width: 16, align: 'center', format: (v) => v || '-' },
+    {
+      header: 'Total Invoiced',
+      key: 'total_invoiced',
+      width: 16,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val || 0),
+    },
+    {
+      header: 'Balance Due',
+      key: 'balance_due',
+      width: 16,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val || 0),
+    },
+  ];
+
+  const orgExportOptions = {
+    filename: `Organizations_Directory_${new Date().toISOString().slice(0, 10)}`,
+    title: 'Client Organizations & Institutions Directory',
+    subtitle: `Directory overview of ${organizations.length} client entities`,
+    sheetName: 'Clients',
+    columns: orgExportColumns,
+    data: organizations,
+    profile,
+    summaryMetrics: [
+      { label: 'Total Clients', value: organizations.length },
+      { label: 'Total Invoiced', value: formatCurrencyForPdf(totalInvoiced) },
+      { label: 'Outstanding Receivables', value: formatCurrencyForPdf(totalReceivables) },
+    ],
+  };
+
   return (
     <div className="p-8  space-y-6">
       {/* Header */}
@@ -154,13 +196,16 @@ export const Organizations: React.FC<OrganizationsProps> = ({
             Keep billings and records completely separated for each client or institution.
           </p>
         </div>
-        <Button
-          onClick={openAddModal}
-          className="gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-xs"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Add Organization</span>
-        </Button>
+        <div className="flex items-center gap-2">
+          <ExportActions exportOptions={orgExportOptions} size="default" />
+          <Button
+            onClick={openAddModal}
+            className="gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-xs"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Organization</span>
+          </Button>
+        </div>
       </div>
 
       {/* Aggregate Cards */}

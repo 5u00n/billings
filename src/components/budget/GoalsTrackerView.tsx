@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { FinancialGoal, GoalStatus } from '../../types';
 import { formatINR } from '../../utils/numberToWords';
 import { Button } from '../ui/button';
+import { ExportActions } from '../common/ExportActions';
+import { ExportColumn, formatCurrencyForPdf } from '../../utils/dataExport';
 import {
   Target,
   Plus,
@@ -281,6 +283,83 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
     ? completedGoals
     : goals;
 
+  const goalsExportColumns: ExportColumn<FinancialGoal>[] = [
+    { header: 'Goal / Milestone', key: 'name', width: 24, align: 'left' },
+    {
+      header: 'Target Amount',
+      key: 'target_amount',
+      width: 15,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Saved Amount',
+      key: 'saved_amount',
+      width: 15,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Progress %',
+      key: 'progress',
+      width: 12,
+      align: 'center',
+      format: (_, g) =>
+        g.status === 'COMPLETED'
+          ? '100%'
+          : `${Math.min(100, Math.round(((g.saved_amount || 0) / (g.target_amount || 1)) * 100))}%`,
+    },
+    {
+      header: 'Status',
+      key: 'status',
+      width: 14,
+      align: 'center',
+      format: (val) => {
+        if (val === 'COMPLETED') return 'Completed & Bought';
+        if (val === 'REACHED') return 'Target Reached';
+        return 'In Progress';
+      },
+    },
+    {
+      header: 'Target Date',
+      key: 'target_date',
+      width: 14,
+      align: 'center',
+      format: (val) => val || '-',
+    },
+    {
+      header: 'Completed Date',
+      key: 'completed_date',
+      width: 14,
+      align: 'center',
+      format: (val) => val || '-',
+    },
+    {
+      header: 'Notes',
+      key: 'notes',
+      width: 22,
+      align: 'left',
+      format: (val) => val || '',
+    },
+  ];
+
+  const goalsExportOptions = {
+    filename: `Financial_Goals_${filterTab.toLowerCase()}_${new Date().toISOString().slice(0, 10)}`,
+    title: 'Financial Goals & Milestones Portfolio',
+    subtitle: `Exported ${displayedGoals.length} goals (Tab: ${filterTab})`,
+    sheetName: 'Goals',
+    columns: goalsExportColumns,
+    data: displayedGoals,
+    summaryMetrics: [
+      { label: 'Total Target', value: formatCurrencyForPdf(totalTarget) },
+      { label: 'Active Savings Stash', value: formatCurrencyForPdf(activeSavedPortfolio) },
+      { label: 'Acquired Assets (Paid)', value: formatCurrencyForPdf(acquiredAssetsValue) },
+      { label: 'Milestones Exported', value: `${displayedGoals.length} of ${goals.length}` },
+    ],
+  };
+
   return (
     <div className="space-y-6">
       {/* Portfolio Progress Header */}
@@ -361,8 +440,11 @@ export const GoalsTrackerView: React.FC<GoalsTrackerViewProps> = ({
           </button>
         </div>
 
-        <div className="text-xs text-slate-500 dark:text-slate-400">
-          Showing {displayedGoals.length} of {goals.length} milestones
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-slate-500 dark:text-slate-400">
+            Showing {displayedGoals.length} of {goals.length} milestones
+          </span>
+          <ExportActions exportOptions={goalsExportOptions} />
         </div>
       </div>
 

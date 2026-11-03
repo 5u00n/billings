@@ -21,8 +21,18 @@ import {
   ArrowUpRight,
   CheckCircle2,
   Clock,
+  Layers,
+  Banknote,
+  ArrowUpDown,
+  SlidersHorizontal,
+  Building,
 } from 'lucide-react';
 import { DataImportModal, FieldDefinition } from '../common/DataImportModal';
+import { DistinctDropdownFilter, DistinctFilterOption } from '../common/DistinctDropdownFilter';
+import { FilterChipsBar, ActiveFilterChip } from '../common/FilterChipsBar';
+import { ExportActions } from '../common/ExportActions';
+import { ExportColumn, formatCurrencyForPdf } from '../../utils/dataExport';
+import { BudgetPacingBar } from './BudgetPacingBar';
 
 interface ExpenseLogViewProps {
   expenses: Expense[];
@@ -148,6 +158,11 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'reg' | 'ext'>('all');
   const [selectedTag, setSelectedTag] = useState<string>('all');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>('all');
+  const [selectedLiabilityType, setSelectedLiabilityType] = useState<string>('all');
+  const [selectedTaxClassification, setSelectedTaxClassification] = useState<string>('all');
+  const [selectedAmountBand, setSelectedAmountBand] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<string>('date_desc');
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(quickAddOpen || quickPaybackOpen);
@@ -399,20 +414,111 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
     }
   };
 
+  // Dynamic distinct tag options
+  const distinctTagCounts = expenses.reduce((acc, e) => {
+    if (e.tag) acc[e.tag] = (acc[e.tag] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+  const tagOptions: DistinctFilterOption[] = Object.entries(distinctTagCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([t, count]) => ({ value: t, label: t, count }));
+
+  // Dynamic distinct payment method options
+  const distinctPaymentCounts = expenses.reduce((acc, e) => {
+    const pm = e.payment_method || 'UPI / Bank';
+    acc[pm] = (acc[pm] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+  const paymentOptions: DistinctFilterOption[] = Object.entries(distinctPaymentCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([pm, count]) => ({ value: pm, label: pm, count }));
+
+  // Dynamic distinct tax classification options
+  const distinctTaxCounts = expenses.reduce((acc, e) => {
+    if (e.tax_classification) acc[e.tax_classification] = (acc[e.tax_classification] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+  const taxOptions: DistinctFilterOption[] = Object.entries(distinctTaxCounts)
+    .map(([tc, count]) => ({
+      value: tc,
+      label: tc.replace(/_/g, ' '),
+      count,
+    }));
+
+  // Liability / type options with counts
+  const directCount = expenses.filter((e) => {
+    const isPayback = e.tag?.toLowerCase().includes('debt') || e.tag?.toLowerCase().includes('payback') || !!e.linked_borrow_id;
+    const isBorrowAcc = !!e.borrowing_account_id || ['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(e.payment_method || '');
+    return !isPayback && !isBorrowAcc;
+  }).length;
+  const borrowAccCount = expenses.filter((e) => !!e.borrowing_account_id || ['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(e.payment_method || '')).length;
+  const debtPaybackCount = expenses.filter((e) => e.tag?.toLowerCase().includes('debt') || e.tag?.toLowerCase().includes('payback') || !!e.linked_borrow_id).length;
+
+  const liabilityOptions: DistinctFilterOption[] = [
+    { value: 'direct', label: 'Direct Cash/Bank', count: directCount },
+    { value: 'borrowing_account', label: 'Credit Card / Borrowing', count: borrowAccCount },
+    { value: 'debt_payback', label: 'Debt Repayment', count: debtPaybackCount },
+  ];
+
+  // Amount band options with counts
+  const amountBandOptions: DistinctFilterOption[] = [
+    { value: 'under_500', label: 'Under ₹500', count: expenses.filter((e) => e.amount < 500).length },
+    { value: '500_2000', label: '₹500 – ₹2,000', count: expenses.filter((e) => e.amount >= 500 && e.amount <= 2000).length },
+    { value: '2000_10000', label: '₹2,000 – ₹10,000', count: expenses.filter((e) => e.amount > 2000 && e.amount <= 10000).length },
+    { value: 'above_10000', label: 'Above ₹10,000', count: expenses.filter((e) => e.amount > 10000).length },
+  ];
+
+  const sortOptions: DistinctFilterOption[] = [
+    { value: 'date_desc', label: 'Date: Newest First' },
+    { value: 'date_asc', label: 'Date: Oldest First' },
+    { value: 'amount_desc', label: 'Amount: High to Low' },
+    { value: 'amount_asc', label: 'Amount: Low to High' },
+  ];
+
   // Filter expenses
-  const filtered = expenses.filter((exp) => {
-    if (categoryFilter !== 'all' && exp.category !== categoryFilter) return false;
-    if (selectedTag !== 'all' && exp.tag !== selectedTag) return false;
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      const matchDesc = exp.description.toLowerCase().includes(q);
-      const matchTag = exp.tag?.toLowerCase().includes(q);
-      const matchNotes = exp.notes?.toLowerCase().includes(q);
-      const matchPay = exp.payment_method?.toLowerCase().includes(q);
-      if (!matchDesc && !matchTag && !matchNotes && !matchPay) return false;
-    }
-    return true;
-  });
+  const filtered = expenses
+    .filter((exp) => {
+      if (categoryFilter !== 'all' && exp.category !== categoryFilter) return false;
+      if (selectedTag !== 'all' && exp.tag !== selectedTag) return false;
+      if (selectedPaymentMethod !== 'all' && (exp.payment_method || 'UPI / Bank') !== selectedPaymentMethod) return false;
+
+      // Liability / Transaction type
+      if (selectedLiabilityType === 'direct') {
+        const isPayback = exp.tag?.toLowerCase().includes('debt') || exp.tag?.toLowerCase().includes('payback') || !!exp.linked_borrow_id;
+        const isBorrowAcc = !!exp.borrowing_account_id || ['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(exp.payment_method || '');
+        if (isPayback || isBorrowAcc) return false;
+      } else if (selectedLiabilityType === 'borrowing_account') {
+        const isBorrowAcc = !!exp.borrowing_account_id || ['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(exp.payment_method || '');
+        if (!isBorrowAcc) return false;
+      } else if (selectedLiabilityType === 'debt_payback') {
+        const isPayback = exp.tag?.toLowerCase().includes('debt') || exp.tag?.toLowerCase().includes('payback') || !!exp.linked_borrow_id;
+        if (!isPayback) return false;
+      }
+
+      if (selectedTaxClassification !== 'all' && exp.tax_classification !== selectedTaxClassification) return false;
+
+      // Amount bands
+      if (selectedAmountBand === 'under_500' && exp.amount >= 500) return false;
+      if (selectedAmountBand === '500_2000' && (exp.amount < 500 || exp.amount > 2000)) return false;
+      if (selectedAmountBand === '2000_10000' && (exp.amount < 2000 || exp.amount > 10000)) return false;
+      if (selectedAmountBand === 'above_10000' && exp.amount <= 10000) return false;
+
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        const matchDesc = exp.description.toLowerCase().includes(q);
+        const matchTag = exp.tag?.toLowerCase().includes(q);
+        const matchNotes = exp.notes?.toLowerCase().includes(q);
+        const matchPay = exp.payment_method?.toLowerCase().includes(q);
+        if (!matchDesc && !matchTag && !matchNotes && !matchPay) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'date_asc') return a.date.localeCompare(b.date);
+      if (sortBy === 'amount_desc') return b.amount - a.amount;
+      if (sortBy === 'amount_asc') return a.amount - b.amount;
+      return b.date.localeCompare(a.date);
+    });
 
   const totalReg = filtered
     .filter((e) => e.category === 'reg')
@@ -428,11 +534,146 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
 
   const totalOverall = totalReg + totalExt;
 
-  // Extract all unique tags present in current expenses
-  const availableTags = Array.from(new Set(expenses.map((e) => e.tag).filter(Boolean))) as string[];
+  const exportColumns: ExportColumn<Expense>[] = [
+    { header: 'Date', key: 'date', width: 12, align: 'center' },
+    { header: 'Description', key: 'description', width: 28, align: 'left' },
+    {
+      header: 'Category',
+      key: 'category',
+      width: 14,
+      align: 'center',
+      format: (val) => (val === 'reg' ? 'Regular' : 'Extra'),
+    },
+    { header: 'Tag', key: 'tag', width: 14, align: 'left' },
+    {
+      header: 'Payment Method',
+      key: 'payment_method',
+      width: 18,
+      align: 'left',
+      format: (val) => val || 'UPI / Bank',
+    },
+    {
+      header: 'Amount',
+      key: 'amount',
+      width: 14,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Tax Deductible',
+      key: 'tax_classification',
+      width: 14,
+      align: 'center',
+      format: (val) => (val === 'deductible' ? 'Yes' : 'No'),
+    },
+    {
+      header: 'Notes',
+      key: 'notes',
+      width: 22,
+      align: 'left',
+      format: (val) => val || '',
+    },
+  ];
+
+  const exportOptions = {
+    filename: `Expense_Ledger_${currentMonth || 'all'}_${new Date().toISOString().slice(0, 10)}`,
+    title: `Expense Ledger Report - ${currentMonth || 'All Time'}`,
+    subtitle: `Exported ${filtered.length} entries matching applied filters`,
+    sheetName: 'Expenses',
+    columns: exportColumns,
+    data: filtered,
+    summaryMetrics: [
+      { label: 'Total Regular', value: formatCurrencyForPdf(totalReg) },
+      { label: 'Total Extra', value: formatCurrencyForPdf(totalExt) },
+      { label: 'Debt Paybacks', value: formatCurrencyForPdf(totalDebtPaid) },
+      { label: 'Total Outflow', value: formatCurrencyForPdf(totalOverall) },
+      { label: 'Entries Exported', value: `${filtered.length} of ${expenses.length}` },
+    ],
+  };
+
+  // Active filter chips
+  const activeChips: ActiveFilterChip[] = [];
+  if (categoryFilter !== 'all') {
+    activeChips.push({
+      key: 'category',
+      label: 'Category',
+      valueDisplay: categoryFilter === 'reg' ? 'Regular' : 'Extra',
+      onRemove: () => setCategoryFilter('all'),
+    });
+  }
+  if (selectedTag !== 'all') {
+    activeChips.push({
+      key: 'tag',
+      label: 'Tag',
+      valueDisplay: selectedTag,
+      onRemove: () => setSelectedTag('all'),
+    });
+  }
+  if (selectedPaymentMethod !== 'all') {
+    activeChips.push({
+      key: 'payment',
+      label: 'Payment',
+      valueDisplay: selectedPaymentMethod,
+      onRemove: () => setSelectedPaymentMethod('all'),
+    });
+  }
+  if (selectedLiabilityType !== 'all') {
+    const opt = liabilityOptions.find((o) => o.value === selectedLiabilityType);
+    activeChips.push({
+      key: 'liability',
+      label: 'Type',
+      valueDisplay: opt ? opt.label : selectedLiabilityType,
+      onRemove: () => setSelectedLiabilityType('all'),
+    });
+  }
+  if (selectedTaxClassification !== 'all') {
+    activeChips.push({
+      key: 'tax',
+      label: 'Tax',
+      valueDisplay: selectedTaxClassification.replace(/_/g, ' '),
+      onRemove: () => setSelectedTaxClassification('all'),
+    });
+  }
+  if (selectedAmountBand !== 'all') {
+    const opt = amountBandOptions.find((o) => o.value === selectedAmountBand);
+    activeChips.push({
+      key: 'amount',
+      label: 'Amount',
+      valueDisplay: opt ? opt.label : selectedAmountBand,
+      onRemove: () => setSelectedAmountBand('all'),
+    });
+  }
+  if (search.trim()) {
+    activeChips.push({
+      key: 'search',
+      label: 'Search',
+      valueDisplay: `"${search.trim()}"`,
+      onRemove: () => setSearch(''),
+    });
+  }
+
+  const handleClearAllFilters = () => {
+    setCategoryFilter('all');
+    setSelectedTag('all');
+    setSelectedPaymentMethod('all');
+    setSelectedLiabilityType('all');
+    setSelectedTaxClassification('all');
+    setSelectedAmountBand('all');
+    setSearch('');
+  };
 
   return (
     <div className="space-y-6">
+      {/* Monthly Budget Target & Pacing Bar */}
+      <BudgetPacingBar
+        currentMonth={currentMonth}
+        totalSpent={totalOverall}
+        regSpent={totalReg}
+        extSpent={totalExt}
+        onRefresh={() => onRefresh()}
+      />
+
       {/* Top Controls & Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
         <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-2xs">
@@ -495,66 +736,139 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-2xs flex flex-col md:flex-row items-center justify-between gap-3">
-        <div className="relative w-full md:w-80">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Search description, tag, payment..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-          />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-          {/* Category Pills */}
-          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300">
-            <button
-              onClick={() => setCategoryFilter('all')}
-              className={`px-3 py-1 rounded-md transition-colors ${
-                categoryFilter === 'all' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs font-semibold' : 'hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              All
-            </button>
-            <button
-              onClick={() => setCategoryFilter('reg')}
-              className={`px-3 py-1 rounded-md transition-colors ${
-                categoryFilter === 'reg' ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-400 shadow-2xs font-semibold' : 'hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              Regular
-            </button>
-            <button
-              onClick={() => setCategoryFilter('ext')}
-              className={`px-3 py-1 rounded-md transition-colors ${
-                categoryFilter === 'ext' ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-400 shadow-2xs font-semibold' : 'hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              Extra
-            </button>
+      <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          {/* Search Input */}
+          <div className="relative w-full lg:w-72">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search description, tag, payment..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+            />
           </div>
 
-          {/* Tag Filter */}
-          {availableTags.length > 0 && (
-            <div className="flex items-center gap-1.5 text-xs">
-              <Filter className="w-3.5 h-3.5 text-slate-400" />
-              <select
-                value={selectedTag}
-                onChange={(e) => setSelectedTag(e.target.value)}
-                className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 dark:text-slate-200 rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          {/* Category Tabs & Distinct Dropdown Filters */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Category Tabs */}
+            <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300">
+              <button
+                type="button"
+                onClick={() => setCategoryFilter('all')}
+                className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
+                  categoryFilter === 'all'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs font-semibold'
+                    : 'hover:text-slate-900 dark:hover:text-white'
+                }`}
               >
-                <option value="all">All Tags</option>
-                {availableTags.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
+                All
+              </button>
+              <button
+                type="button"
+                onClick={() => setCategoryFilter('reg')}
+                className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
+                  categoryFilter === 'reg'
+                    ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-400 shadow-2xs font-semibold'
+                    : 'hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Regular
+              </button>
+              <button
+                type="button"
+                onClick={() => setCategoryFilter('ext')}
+                className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
+                  categoryFilter === 'ext'
+                    ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-400 shadow-2xs font-semibold'
+                    : 'hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Extra
+              </button>
             </div>
-          )}
+
+            {/* Distinct Tag Dropdown */}
+            {tagOptions.length > 0 && (
+              <DistinctDropdownFilter
+                label="Tag"
+                icon={Tag}
+                value={selectedTag}
+                onChange={setSelectedTag}
+                options={tagOptions}
+                allLabel="All Tags"
+              />
+            )}
+
+            {/* Distinct Payment Method Dropdown */}
+            {paymentOptions.length > 0 && (
+              <DistinctDropdownFilter
+                label="Payment"
+                icon={CreditCard}
+                value={selectedPaymentMethod}
+                onChange={setSelectedPaymentMethod}
+                options={paymentOptions}
+                allLabel="All Modes"
+              />
+            )}
+
+            {/* Outflow / Liability Type Dropdown */}
+            <DistinctDropdownFilter
+              label="Type"
+              icon={Layers}
+              value={selectedLiabilityType}
+              onChange={setSelectedLiabilityType}
+              options={liabilityOptions}
+              allLabel="All Types"
+            />
+
+            {/* Amount Band Dropdown */}
+            <DistinctDropdownFilter
+              label="Amount"
+              icon={Banknote}
+              value={selectedAmountBand}
+              onChange={setSelectedAmountBand}
+              options={amountBandOptions}
+              allLabel="Any Amount"
+            />
+
+            {/* Tax Classification Dropdown if present */}
+            {taxOptions.length > 0 && (
+              <DistinctDropdownFilter
+                label="Tax"
+                icon={Building}
+                value={selectedTaxClassification}
+                onChange={setSelectedTaxClassification}
+                options={taxOptions}
+                allLabel="All Tax Classes"
+              />
+            )}
+
+            {/* Sort Dropdown */}
+            <DistinctDropdownFilter
+              label="Sort"
+              icon={ArrowUpDown}
+              value={sortBy}
+              onChange={setSortBy}
+              options={sortOptions}
+              allLabel="Date: Newest"
+              align="right"
+            />
+
+            {/* Export Actions (Excel & PDF) */}
+            <ExportActions exportOptions={exportOptions} />
+          </div>
         </div>
+
+        {/* Active Filter Chips & Counter */}
+        <FilterChipsBar
+          chips={activeChips}
+          onClearAll={handleClearAllFilters}
+          filteredCount={filtered.length}
+          totalCount={expenses.length}
+          itemNoun="expenses"
+        />
       </div>
 
       {/* Expenses Table */}

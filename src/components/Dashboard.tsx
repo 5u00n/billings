@@ -59,6 +59,7 @@ import {
 } from './ui/chart';
 import { useTheme } from '../context/ThemeContext';
 import { NavTab } from './Sidebar';
+import { BudgetPacingBar } from './budget/BudgetPacingBar';
 
 interface DashboardProps {
   invoices: Invoice[];
@@ -457,6 +458,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </CardContent>
         </Card>
       </div>
+
+      {/* Monthly Budget Pace & Allowance Bar */}
+      <BudgetPacingBar
+        currentMonth={selectedMonth}
+        totalSpent={budgetSummary?.total_expense || 0}
+        regSpent={budgetSummary?.reg_expense || 0}
+        extSpent={budgetSummary?.ext_expense || 0}
+        onRefresh={fetchDashboardData}
+      />
 
       {/* Analytics & Graphs Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

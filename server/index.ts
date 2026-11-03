@@ -1,5 +1,7 @@
 import { borrowingRouter } from './borrowing/router';
 import { sqliteStore } from './borrowing/store';
+import { runDiagnostics, executeRepair } from './admin/diagnostics';
+import { createEntityId } from './utils/id';
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -145,6 +147,30 @@ app.get('/api/health', (_req: Request, res: Response) => {
     platform: 'express-local',
     timestamp: new Date().toISOString(),
   });
+});
+
+// ----------------- ADMIN DIAGNOSTICS & REPAIR -----------------
+
+app.get('/api/admin/diagnostics', async (_req: Request, res: Response) => {
+  try {
+    const report = await runDiagnostics(db);
+    res.json(report);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Diagnostics failed' });
+  }
+});
+
+app.post('/api/admin/repair', async (req: Request, res: Response) => {
+  const { action, dryRun } = req.body || {};
+  if (!['reconcile_ledger', 'clean_orphans', 'migrate_ids', 'reset_expense_data'].includes(action)) {
+    return res.status(400).json({ error: 'Valid action parameter (reconcile_ledger, clean_orphans, migrate_ids, reset_expense_data) is required' });
+  }
+  try {
+    const result = await executeRepair(db, action, Boolean(dryRun));
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Repair operation failed' });
+  }
 });
 
 app.get('/api/auth/verify', (req: Request, res: Response) => {
@@ -310,7 +336,7 @@ app.get('/api/invoices/:id', (req: Request, res: Response) => {
 
 app.post('/api/invoices', (req: Request, res: Response) => {
   const body = req.body;
-  const id = body.id || `inv-${Date.now()}`;
+  const id = body.id || createEntityId('inv');
   const itemsJson = JSON.stringify(body.items || []);
 
   try {
@@ -338,6 +364,26 @@ app.post('/api/invoices', (req: Request, res: Response) => {
       body.copy_type || 'ORIGINAL',
       body.hide_qty ? 1 : 0
     );
+
+    // Also populate normalized invoice_items table
+    if (Array.isArray(body.items)) {
+      const insertItem = db.prepare(`
+        INSERT OR REPLACE INTO invoice_items (id, invoice_id, catalog_item_id, description, qty, rate, amount, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      body.items.forEach((item: any, idx: number) => {
+        insertItem.run(
+          item.id || createEntityId('itm'),
+          id,
+          item.catalog_item_id || null,
+          item.description || '',
+          item.qty || 1,
+          item.rate || 0,
+          item.amount || (Number(item.qty || 1) * Number(item.rate || 0)),
+          idx
+        );
+      });
+    }
 
     // Update numbering setting if it matches the current sequence or prefix
     const numberingRow: any = db.prepare('SELECT value_json FROM settings WHERE key = ?').get('numbering');
@@ -440,33 +486,19 @@ app.delete('/api/invoices/:id', (req: Request, res: Response) => {
 // ----------------- ORGANIZATIONS API -----------------
 
 app.get('/api/organizations', (_req: Request, res: Response) => {
-  const orgs: any[] = db.prepare('SELECT * FROM organizations ORDER BY name ASC').all();
-
-  // Aggregate stats per organization
-  const results = orgs.map((org) => {
-    const stats: any = db
-      .prepare(
-        `
-      SELECT 
-        COUNT(*) as invoices_count,
-        COALESCE(SUM(total), 0) as total_invoiced,
-        COALESCE(SUM(amount_paid), 0) as total_paid,
-        COALESCE(SUM(balance_due), 0) as balance_due
-      FROM invoices
-      WHERE organization_id = ?
-    `
-      )
-      .get(org.id);
-
-    return {
-      ...org,
-      invoices_count: stats?.invoices_count || 0,
-      total_invoiced: stats?.total_invoiced || 0,
-      total_paid: stats?.total_paid || 0,
-      balance_due: stats?.balance_due || 0,
-    };
-  });
-
+  const query = `
+    SELECT 
+      o.*,
+      COALESCE(COUNT(i.id), 0) as invoices_count,
+      COALESCE(SUM(i.total), 0) as total_invoiced,
+      COALESCE(SUM(i.amount_paid), 0) as total_paid,
+      COALESCE(SUM(i.balance_due), 0) as balance_due
+    FROM organizations o
+    LEFT JOIN invoices i ON i.organization_id = o.id
+    GROUP BY o.id
+    ORDER BY o.name ASC
+  `;
+  const results = db.prepare(query).all();
   res.json(results);
 });
 
@@ -509,7 +541,7 @@ app.get('/api/organizations/:id', (req: Request, res: Response) => {
 
 app.post('/api/organizations', (req: Request, res: Response) => {
   const body = req.body;
-  const id = body.id || `org-${Date.now()}`;
+  const id = body.id || createEntityId('org');
 
   db.prepare(`
     INSERT INTO organizations (id, name, address, city, state, pincode, country, phone, email, notes)
@@ -671,7 +703,7 @@ app.get('/api/catalog', (_req: Request, res: Response) => {
 });
 
 app.post('/api/catalog', (req: Request, res: Response) => {
-  const id = req.body.id || `cat-${Date.now()}`;
+  const id = req.body.id || createEntityId('itm');
   db.prepare('INSERT INTO catalog_items (id, name, description, default_rate) VALUES (?, ?, ?, ?)').run(
     id,
     req.body.name,
@@ -694,7 +726,7 @@ app.post('/api/catalog/batch', (req: Request, res: Response) => {
     const insertMany = db.transaction((records: any[]) => {
       for (const item of records) {
         if (!item.name && !item.description) continue;
-        const id = item.id || `cat-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const id = item.id || createEntityId('itm');
         const name = String(item.name || item.description || 'Item').trim();
         const description = String(item.description || '').trim();
         const defaultRate = Number(item.default_rate || item.rate || 0);
@@ -1585,11 +1617,15 @@ function calculateBudgetSummary(month: string) {
     const totalInflow = previousRemaining + totalIncomeEarned;
     const debtPayment = sumTotals?.total_debt_paid || 0;
 
-    const overhead = (totalInflow + finalBorrow) - (totalExpense + debtPayment);
+    const cashBeforeSavings = (totalInflow + finalBorrow) - (totalExpense + debtPayment);
+    const overhead = Math.max(0, cashBeforeSavings);
+    const manualSavings = (sumTotals?.total_reg_savings || 0) + (sumTotals?.total_ext_savings || 0);
+    const netCash = cashBeforeSavings - manualSavings;
+    const cashShortfall = Math.max(0, -netCash);
+    const remaining = Math.max(0, netCash);
     const overheadSavings = overhead > 0 ? Math.round(overhead / 2) : 0;
-    const totalSavings = (sumTotals?.total_reg_savings || 0) + (sumTotals?.total_ext_savings || 0) + overheadSavings;
-    const remaining = overhead - overheadSavings;
-    const endingDebt = startingDebt + finalBorrow - debtPayment;
+    const totalSavings = manualSavings + overheadSavings;
+    const endingDebt = (startingDebt - debtPayment) + finalBorrow + cashShortfall;
 
     return {
       month: 'all',
@@ -1691,11 +1727,15 @@ function calculateBudgetSummary(month: string) {
   const debtPayment = summary.dept_payment || autoDebtPaid;
 
   // Excel formula: Overhead = (Total Inflow + Borrow) - (Total Outflow + Debt Paid)
-  const overhead = (totalInflow + finalBorrow) - (totalExpense + debtPayment);
+  const cashBeforeSavings = (totalInflow + finalBorrow) - (totalExpense + debtPayment);
+  const overhead = Math.max(0, cashBeforeSavings);
+  const manualSavings = (summary.reg_savings || 0) + (summary.ext_savings || 0);
+  const netCash = cashBeforeSavings - manualSavings;
+  const cashShortfall = Math.max(0, -netCash);
+  const remaining = Math.max(0, netCash);
   const overheadSavings = overhead > 0 ? Math.round(overhead / 2) : 0;
-  const totalSavings = (summary.reg_savings || 0) + (summary.ext_savings || 0) + overheadSavings;
-  const remaining = overhead - overheadSavings;
-  const endingDebt = (summary.starting_debt || 0) + finalBorrow - debtPayment;
+  const totalSavings = manualSavings + overheadSavings;
+  const endingDebt = (summary.starting_debt || 0) + finalBorrow - debtPayment + cashShortfall;
 
   return {
     month,
@@ -1723,6 +1763,42 @@ function calculateBudgetSummary(month: string) {
     notes: summary.notes || '',
   };
 }
+
+// Get monthly budget limits & targets
+app.get('/api/budget/limits', (req: Request, res: Response) => {
+  const month = (req.query.month as string) || new Date().toISOString().substring(0, 7);
+  try {
+    const row = db.prepare('SELECT * FROM monthly_budget_limits WHERE month = ?').get(month);
+    if (!row) {
+      res.json({ month, regular_budget: 20000, extra_budget: 10000, total_budget: 30000 });
+    } else {
+      res.json(row);
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update or set monthly budget limits & targets
+app.post('/api/budget/limits', (req: Request, res: Response) => {
+  const { month, regular_budget = 0, extra_budget = 0, total_budget = 0, notes = '' } = req.body;
+  const effectiveTotal = Number(total_budget) || (Number(regular_budget) + Number(extra_budget));
+  try {
+    db.prepare(`
+      INSERT INTO monthly_budget_limits (month, regular_budget, extra_budget, total_budget, notes, updated_at)
+      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(month) DO UPDATE SET
+        regular_budget = excluded.regular_budget,
+        extra_budget = excluded.extra_budget,
+        total_budget = excluded.total_budget,
+        notes = excluded.notes,
+        updated_at = CURRENT_TIMESTAMP
+    `).run(month, regular_budget, extra_budget, effectiveTotal, notes);
+    res.json({ success: true, month, total_budget: effectiveTotal });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Get monthly aggregated cashflow summary
 app.get('/api/budget/summary', (req: Request, res: Response) => {
@@ -1866,15 +1942,17 @@ app.get('/api/budget/monthly-breakdown', (_req: Request, res: Response) => {
       // Dept Payment
       const deptPayment = summary.dept_payment || 0;
 
-      // Overhead = Total Income + Borrow - (Total Expense + Debt Payment)
-      const overhead = (totalIncome + finalBorrow) - (totalExpense + deptPayment);
+      // Cash before savings
+      const cashBeforeSavings = (totalIncome + finalBorrow) - (totalExpense + deptPayment);
+      const overhead = Math.max(0, cashBeforeSavings);
+      const manualSavings = regSavings + extSavings;
+      const netCash = cashBeforeSavings - manualSavings;
+      const cashShortfall = Math.max(0, -netCash);
+      const remaining = Math.max(0, netCash);
       const ovhSavings = overhead > 0 ? Math.round(overhead / 2) : 0;
-      const totalSavings = regSavings + extSavings + ovhSavings;
-      const remaining = overhead > 0 ? (overhead - ovhSavings) : 0;
+      const totalSavings = manualSavings + ovhSavings;
 
-      // Deficit if expenses exceeded income
-      const deficit = totalExpense > totalIncome ? totalExpense - totalIncome : 0;
-      const endingDebt = (startingDebt - deptPayment) + finalBorrow + deficit;
+      const endingDebt = (startingDebt - deptPayment) + finalBorrow + cashShortfall;
 
       // Update carryovers for next iteration
       carryEndingDebt = endingDebt;
@@ -2129,7 +2207,7 @@ app.get('/api/budget/expenses', (req: Request, res: Response) => {
 
 app.post('/api/budget/expenses', (req: Request, res: Response) => {
   const body = req.body;
-  const id = body.id || `exp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const id = body.id || createEntityId('exp');
   const date = (body.date && typeof body.date === 'string' && body.date.trim())
     ? body.date.trim()
     : new Date().toISOString().split('T')[0];
@@ -2251,7 +2329,7 @@ app.post('/api/budget/expenses/batch', (req: Request, res: Response) => {
           ? b.date.trim().substring(0, 10)
           : new Date().toISOString().split('T')[0];
         const month = b.month || date.substring(0, 7);
-        const id = b.id || `exp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const id = b.id || createEntityId('exp');
         const amount = Number(b.amount) || 0;
         if (amount <= 0 || !b.description) continue;
 
@@ -2407,7 +2485,7 @@ app.get('/api/budget/income', (req: Request, res: Response) => {
 
 app.post('/api/budget/income', (req: Request, res: Response) => {
   const body = req.body;
-  const id = body.id || `inc-${Date.now()}`;
+  const id = body.id || createEntityId('inc');
   const date = body.date || new Date().toISOString().split('T')[0];
   const month = body.month || date.substring(0, 7);
 
@@ -2451,7 +2529,7 @@ app.post('/api/budget/income/batch', (req: Request, res: Response) => {
           ? b.date.trim().substring(0, 10)
           : new Date().toISOString().split('T')[0];
         const month = b.month || date.substring(0, 7);
-        const id = b.id || `inc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const id = b.id || createEntityId('inc');
         const amount = Number(b.amount) || 0;
         if (amount <= 0 || !b.source) continue;
 
@@ -2554,7 +2632,7 @@ app.post('/api/budget/borrow', (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Person and a valid amount greater than 0 are required' });
   }
 
-  const id = body.id || `br-${Date.now()}`;
+  const id = body.id || createEntityId('brw');
   const date = (body.date && typeof body.date === 'string' && body.date.trim())
     ? body.date.trim().substring(0, 10)
     : new Date().toISOString().split('T')[0];
@@ -2600,7 +2678,7 @@ app.post('/api/budget/borrow/batch', (req: Request, res: Response) => {
           ? b.date.trim().substring(0, 10)
           : new Date().toISOString().split('T')[0];
         const month = b.month || date.substring(0, 7);
-        const id = b.id || `br-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const id = b.id || createEntityId('brw');
         const amount = Number(b.amount) || 0;
         if (amount <= 0 || !b.person) continue;
 

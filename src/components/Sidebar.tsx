@@ -42,6 +42,7 @@ export type NavTab =
   | 'expenses'
   | 'borrow'
   | 'allocations'
+  | 'compare'
   | 'goals'
   | 'tax'
   | 'settings';
@@ -190,6 +191,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           label: 'Allocation Envelopes',
           icon: Layers,
           color: 'text-purple-400',
+        },
+        {
+          id: 'compare' as NavTab,
+          label: 'Period Comparison',
+          icon: ArrowLeftRight,
+          color: 'text-sky-400',
         },
         {
           id: 'goals' as NavTab,

@@ -21,6 +21,8 @@ import { Expense, TaxAuditSummary, TaxClassification } from '../../types';
 import { Button } from '../ui/button';
 import { SbiStatementParserModal } from './SbiStatementParserModal';
 import { SbiPpsChequeModal } from './SbiPpsChequeModal';
+import { ExportActions } from '../common/ExportActions';
+import { ExportColumn, formatCurrencyForPdf } from '../../utils/dataExport';
 
 interface TaxAuditViewProps {
   summary: TaxAuditSummary | null;
@@ -121,12 +123,83 @@ export const TaxAuditView: React.FC<TaxAuditViewProps> = ({ summary, expenses, o
   const score = summary?.complianceScore ?? 100;
   const scoreColor =
     score >= 80 ? 'text-emerald-500' : score >= 60 ? 'text-amber-500' : 'text-rose-500';
-  const scoreBg =
-    score >= 80
-      ? 'bg-emerald-500/10 border-emerald-500/20'
-      : score >= 60
-      ? 'bg-amber-500/10 border-amber-500/20'
-      : 'bg-rose-500/10 border-rose-500/20';
+  const totalFilteredGross = filteredExpenses.reduce((s, e) => s + (e.amount || 0), 0);
+  const totalFilteredAllowed = filteredExpenses.reduce((s, e) => {
+    const taxClass = e.tax_classification || 'BUSINESS_DEDUCTIBLE';
+    if (taxClass === 'PERSONAL_DRAWINGS' || taxClass === 'CAPITAL_INTRODUCED') return s;
+    const busPct = e.business_percentage !== undefined ? e.business_percentage : 100;
+    return s + (e.amount * busPct) / 100;
+  }, 0);
+
+  const taxAuditExportColumns: ExportColumn<Expense>[] = [
+    { header: 'Date', key: 'date', width: 12, align: 'center' },
+    { header: 'Description', key: 'description', width: 26, align: 'left' },
+    { header: 'Tag', key: 'tag', width: 14, align: 'left' },
+    { header: 'Payment Method', key: 'payment_method', width: 16, align: 'left' },
+    {
+      header: 'Gross Amount',
+      key: 'amount',
+      width: 15,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Tax Classification',
+      key: 'tax_classification',
+      width: 20,
+      align: 'left',
+      format: (val) => String(val || 'BUSINESS_DEDUCTIBLE').replace('_', ' '),
+    },
+    {
+      header: 'Voucher Proof',
+      key: 'has_invoice_voucher',
+      width: 12,
+      align: 'center',
+      format: (val) => (val ? 'Yes' : 'Missing'),
+    },
+    {
+      header: 'Business %',
+      key: 'business_percentage',
+      width: 12,
+      align: 'center',
+      format: (val) => `${val !== undefined ? val : 100}%`,
+    },
+    {
+      header: 'Tax Allowed',
+      key: 'tax_allowed',
+      width: 15,
+      align: 'right',
+      isNumeric: true,
+      format: (_, e) => {
+        const taxClass = e.tax_classification || 'BUSINESS_DEDUCTIBLE';
+        if (taxClass === 'PERSONAL_DRAWINGS' || taxClass === 'CAPITAL_INTRODUCED') return 0;
+        const busPct = e.business_percentage !== undefined ? e.business_percentage : 100;
+        return Math.round(((e.amount * busPct) / 100) * 100) / 100;
+      },
+      formatPdf: (_, e) => {
+        const taxClass = e.tax_classification || 'BUSINESS_DEDUCTIBLE';
+        if (taxClass === 'PERSONAL_DRAWINGS' || taxClass === 'CAPITAL_INTRODUCED') return 'Rs. 0.00';
+        const busPct = e.business_percentage !== undefined ? e.business_percentage : 100;
+        return formatCurrencyForPdf((e.amount * busPct) / 100);
+      },
+    },
+  ];
+
+  const taxAuditExportOptions = {
+    filename: `Tax_Audit_Ledger_${filterType}_${new Date().toISOString().slice(0, 10)}`,
+    title: 'Income Tax & Deductibility Audit Ledger',
+    subtitle: `Exported ${filteredExpenses.length} vouchers (Filter: ${filterType})`,
+    sheetName: 'TaxAudit',
+    columns: taxAuditExportColumns,
+    data: filteredExpenses,
+    summaryMetrics: [
+      { label: 'Total Gross Outflow', value: formatCurrencyForPdf(totalFilteredGross) },
+      { label: 'Allowed Deductions', value: formatCurrencyForPdf(totalFilteredAllowed) },
+      { label: 'Compliance Health Score', value: `${score}/100` },
+      { label: 'Vouchers Exported', value: `${filteredExpenses.length} of ${expenses.length}` },
+    ],
+  };
 
   return (
     <div className="space-y-6">
@@ -423,7 +496,7 @@ export const TaxAuditView: React.FC<TaxAuditViewProps> = ({ summary, expenses, o
               {isAutoClassifying ? 'Categorizing...' : 'Auto-Categorize Tax Expenses'}
             </Button>
 
-            {/* Filter buttons */}
+              {/* Filter buttons */}
             <div className="flex items-center rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 p-0.5 text-xs">
               {[
                 { id: 'all', label: 'All' },
@@ -446,6 +519,9 @@ export const TaxAuditView: React.FC<TaxAuditViewProps> = ({ summary, expenses, o
                 </button>
               ))}
             </div>
+
+            {/* Export Actions (Excel & PDF) */}
+            <ExportActions exportOptions={taxAuditExportOptions} />
           </div>
         </div>
 

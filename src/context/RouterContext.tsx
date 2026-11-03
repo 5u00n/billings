@@ -59,6 +59,9 @@ export function parseRoute(pathname: string): RouteState {
       return { path: '/spreadsheet', tab: 'spreadsheet' };
     case 'allocations':
       return { path: '/allocations', tab: 'allocations' };
+    case 'compare':
+    case 'comparison':
+      return { path: '/compare', tab: 'compare' };
     case 'loans':
     case 'debts':
     case 'borrow':
@@ -97,6 +100,8 @@ export function tabToPath(tab: NavTab, subTab?: string): string {
       return '/returns';
     case 'allocations':
       return '/allocations';
+    case 'compare':
+      return '/compare';
     case 'expenses':
       return '/expenses';
     case 'income':

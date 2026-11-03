@@ -15,8 +15,16 @@ import {
   Search,
   Filter,
   FileSpreadsheet,
+  Banknote,
+  User,
+  ArrowUpDown,
+  Layers,
 } from 'lucide-react';
 import { DataImportModal, FieldDefinition } from '../common/DataImportModal';
+import { DistinctDropdownFilter, DistinctFilterOption } from '../common/DistinctDropdownFilter';
+import { FilterChipsBar, ActiveFilterChip } from '../common/FilterChipsBar';
+import { ExportActions } from '../common/ExportActions';
+import { ExportColumn, formatCurrencyForPdf } from '../../utils/dataExport';
 
 interface BorrowReturnsViewProps {
   records: BorrowRecord[];
@@ -96,6 +104,9 @@ export const BorrowReturnsView: React.FC<BorrowReturnsViewProps> = ({
 }) => {
   const [filterType, setFilterType] = useState<'ALL' | BorrowType>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDING' | 'SETTLED'>('ALL');
+  const [selectedPerson, setSelectedPerson] = useState<string>('all');
+  const [selectedAmountBand, setSelectedAmountBand] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<string>('date_desc');
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -241,99 +252,337 @@ export const BorrowReturnsView: React.FC<BorrowReturnsViewProps> = ({
   // Separate loans/borrowed debts from returns (returns are now in their own tab)
   const borrowRecords = records.filter((r) => r.type !== 'RETURN' && !r.migrated_account_id);
 
-  const filtered = borrowRecords.filter((r) => {
-    if (filterType !== 'ALL' && r.type !== filterType) return false;
-    if (statusFilter !== 'ALL' && r.status !== statusFilter) return false;
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      const matchPerson = r.person.toLowerCase().includes(q);
-      const matchReason = r.reason?.toLowerCase().includes(q);
-      if (!matchPerson && !matchReason) return false;
-    }
-    return true;
-  });
+  // Dynamic distinct person options with record counts
+  const personCounts = borrowRecords.reduce((acc, r) => {
+    if (r.person) acc[r.person] = (acc[r.person] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
 
-  const totalBorrowedPending = borrowRecords
+  const personOptions: DistinctFilterOption[] = Object.entries(personCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([p, count]) => ({ value: p, label: p, count }));
+
+  // Dynamic distinct loan type options
+  const typeCounts = borrowRecords.reduce((acc, r) => {
+    acc[r.type] = (acc[r.type] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const typeOptions: DistinctFilterOption[] = [
+    { value: 'BORROW', label: 'Borrow (Inflow)', count: typeCounts['BORROW'] || 0 },
+    { value: 'LENT', label: 'Lent (Outflow)', count: typeCounts['LENT'] || 0 },
+  ];
+
+  // Dynamic distinct status options
+  const statusCounts = borrowRecords.reduce((acc, r) => {
+    acc[r.status] = (acc[r.status] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const statusOptions: DistinctFilterOption[] = [
+    { value: 'PENDING', label: 'Active Debt (Pending)', count: statusCounts['PENDING'] || 0 },
+    { value: 'SETTLED', label: 'Settled / Paid', count: statusCounts['SETTLED'] || 0 },
+  ];
+
+  // Amount band options with counts
+  const amountBandOptions: DistinctFilterOption[] = [
+    { value: 'under_2k', label: 'Under ₹2,000', count: borrowRecords.filter((r) => r.amount < 2000).length },
+    { value: '2k_10k', label: '₹2,000 – ₹10,000', count: borrowRecords.filter((r) => r.amount >= 2000 && r.amount <= 10000).length },
+    { value: 'above_10k', label: 'Above ₹10,000', count: borrowRecords.filter((r) => r.amount > 10000).length },
+  ];
+
+  const sortOptions: DistinctFilterOption[] = [
+    { value: 'date_desc', label: 'Date: Newest First' },
+    { value: 'date_asc', label: 'Date: Oldest First' },
+    { value: 'amount_desc', label: 'Amount: High to Low' },
+    { value: 'amount_asc', label: 'Amount: Low to High' },
+  ];
+
+  const filtered = borrowRecords
+    .filter((r) => {
+      if (filterType !== 'ALL' && r.type !== filterType) return false;
+      if (statusFilter !== 'ALL' && r.status !== statusFilter) return false;
+      if (selectedPerson !== 'all' && r.person !== selectedPerson) return false;
+
+      // Amount band
+      if (selectedAmountBand === 'under_2k' && r.amount >= 2000) return false;
+      if (selectedAmountBand === '2k_10k' && (r.amount < 2000 || r.amount > 10000)) return false;
+      if (selectedAmountBand === 'above_10k' && r.amount <= 10000) return false;
+
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        const matchPerson = r.person.toLowerCase().includes(q);
+        const matchReason = r.reason?.toLowerCase().includes(q);
+        if (!matchPerson && !matchReason) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'date_asc') return a.date.localeCompare(b.date);
+      if (sortBy === 'amount_desc') return b.amount - a.amount;
+      if (sortBy === 'amount_asc') return a.amount - b.amount;
+      return b.date.localeCompare(a.date);
+    });
+
+  const totalBorrowedPending = filtered
     .filter((r) => r.type === 'BORROW' && r.status === 'PENDING')
     .reduce((sum, r) => sum + r.amount, 0);
 
-  const totalBorrowedSettled = borrowRecords
+  const totalBorrowedSettled = filtered
     .filter((r) => r.type === 'BORROW' && r.status === 'SETTLED')
     .reduce((sum, r) => sum + r.amount, 0);
 
-  const totalLentPending = borrowRecords
+  const totalLentPending = filtered
     .filter((r) => r.type === 'LENT' && r.status === 'PENDING')
     .reduce((sum, r) => sum + r.amount, 0);
+
+  // Active filter chips
+  const activeChips: ActiveFilterChip[] = [];
+  if (filterType !== 'ALL') {
+    activeChips.push({
+      key: 'type',
+      label: 'Type',
+      valueDisplay: filterType === 'BORROW' ? 'Borrow' : 'Lent',
+      onRemove: () => setFilterType('ALL'),
+    });
+  }
+  if (statusFilter !== 'ALL') {
+    activeChips.push({
+      key: 'status',
+      label: 'Status',
+      valueDisplay: statusFilter === 'PENDING' ? 'Active Debt' : 'Settled',
+      onRemove: () => setStatusFilter('ALL'),
+    });
+  }
+  if (selectedPerson !== 'all') {
+    activeChips.push({
+      key: 'person',
+      label: 'Person',
+      valueDisplay: selectedPerson,
+      onRemove: () => setSelectedPerson('all'),
+    });
+  }
+  if (selectedAmountBand !== 'all') {
+    const opt = amountBandOptions.find((o) => o.value === selectedAmountBand);
+    activeChips.push({
+      key: 'amount',
+      label: 'Amount',
+      valueDisplay: opt ? opt.label : selectedAmountBand,
+      onRemove: () => setSelectedAmountBand('all'),
+    });
+  }
+  if (search.trim()) {
+    activeChips.push({
+      key: 'search',
+      label: 'Search',
+      valueDisplay: `"${search.trim()}"`,
+      onRemove: () => setSearch(''),
+    });
+  }
+
+  const handleClearAllFilters = () => {
+    setFilterType('ALL');
+    setStatusFilter('ALL');
+    setSelectedPerson('all');
+    setSelectedAmountBand('all');
+    setSearch('');
+  };
+
+  const borrowExportColumns: ExportColumn<BorrowRecord>[] = [
+    { header: 'Date', key: 'date', width: 12, align: 'center' },
+    { header: 'Person / Contact', key: 'person', width: 22, align: 'left' },
+    {
+      header: 'Type',
+      key: 'type',
+      width: 14,
+      align: 'center',
+      format: (val) => (val === 'BORROW' ? 'Borrow (Inflow)' : 'Lent (Outflow)'),
+    },
+    {
+      header: 'Amount',
+      key: 'amount',
+      width: 15,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Status',
+      key: 'status',
+      width: 14,
+      align: 'center',
+      format: (val) => (val === 'PENDING' ? 'Active Debt' : 'Settled / Paid'),
+    },
+    {
+      header: 'Settled Date',
+      key: 'settled_date',
+      width: 14,
+      align: 'center',
+      format: (val) => val || '-',
+    },
+    {
+      header: 'Reason / Notes',
+      key: 'reason',
+      width: 24,
+      align: 'left',
+      format: (val) => val || '',
+    },
+  ];
+
+  const borrowExportOptions = {
+    filename: `Borrow_Debts_Ledger_${new Date().toISOString().slice(0, 10)}`,
+    title: 'Borrow & Debt Records Report',
+    subtitle: `Exported ${filtered.length} borrow / lending entries matching applied filters`,
+    sheetName: 'Debts',
+    columns: borrowExportColumns,
+    data: filtered,
+    summaryMetrics: [
+      { label: 'Active Borrowed Debt', value: formatCurrencyForPdf(totalBorrowedPending) },
+      { label: 'Settled Debt', value: formatCurrencyForPdf(totalBorrowedSettled) },
+      { label: 'Lent Out (Pending)', value: formatCurrencyForPdf(totalLentPending) },
+      { label: 'Records Exported', value: `${filtered.length} of ${borrowRecords.length}` },
+    ],
+  };
 
   return (
     <div className="space-y-4">
       {/* Clean Single Toolbar */}
-      <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-2xs flex flex-col md:flex-row items-center justify-between gap-3">
-        <div className="relative w-full md:w-80">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Search lender or reason..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-          />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-between md:justify-end">
-          {/* Status filter */}
-          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300">
-            <button
-              onClick={() => setStatusFilter('ALL')}
-              className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
-                statusFilter === 'ALL' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs font-semibold' : 'hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              All
-            </button>
-            <button
-              onClick={() => setStatusFilter('PENDING')}
-              className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
-                statusFilter === 'PENDING' ? 'bg-white dark:bg-slate-900 text-red-700 dark:text-red-400 shadow-2xs font-semibold' : 'hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              Active Debt
-            </button>
-            <button
-              onClick={() => setStatusFilter('SETTLED')}
-              className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
-                statusFilter === 'SETTLED' ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-2xs font-semibold' : 'hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              Settled / Paid
-            </button>
+      <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          {/* Search Box */}
+          <div className="relative w-full lg:w-72">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search lender or reason..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            />
           </div>
 
-          {/* Active Debt Badge */}
-          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 rounded-lg text-xs">
-            <span className="text-slate-500 dark:text-slate-400">Active Debt:</span>
-            <span className="font-bold text-red-700 dark:text-red-400">₹{formatINR(totalBorrowedPending)}</span>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Status Tabs */}
+            <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300">
+              <button
+                type="button"
+                onClick={() => setStatusFilter('ALL')}
+                className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
+                  statusFilter === 'ALL'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs font-semibold'
+                    : 'hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('PENDING')}
+                className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
+                  statusFilter === 'PENDING'
+                    ? 'bg-white dark:bg-slate-900 text-red-700 dark:text-red-400 shadow-2xs font-semibold'
+                    : 'hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Active Debt
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('SETTLED')}
+                className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
+                  statusFilter === 'SETTLED'
+                    ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-2xs font-semibold'
+                    : 'hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Settled / Paid
+              </button>
+            </div>
+
+            {/* Distinct Person Filter */}
+            {personOptions.length > 0 && (
+              <DistinctDropdownFilter
+                label="Person"
+                icon={User}
+                value={selectedPerson}
+                onChange={setSelectedPerson}
+                options={personOptions}
+                allLabel="All Contacts"
+              />
+            )}
+
+            {/* Loan Type Filter */}
+            <DistinctDropdownFilter
+              label="Type"
+              icon={Layers}
+              value={filterType}
+              onChange={(val) => setFilterType(val as any)}
+              options={typeOptions}
+              allLabel="All Types"
+            />
+
+            {/* Amount Band Filter */}
+            <DistinctDropdownFilter
+              label="Amount"
+              icon={Banknote}
+              value={selectedAmountBand}
+              onChange={setSelectedAmountBand}
+              options={amountBandOptions}
+              allLabel="Any Amount"
+            />
+
+            {/* Sort Filter */}
+            <DistinctDropdownFilter
+              label="Sort"
+              icon={ArrowUpDown}
+              value={sortBy}
+              onChange={setSortBy}
+              options={sortOptions}
+              allLabel="Date: Newest"
+              align="right"
+            />
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2 ml-auto">
+              {/* Active Debt Badge */}
+              <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 rounded-lg text-xs">
+                <span className="text-slate-500 dark:text-slate-400">Active Debt:</span>
+                <span className="font-bold text-red-700 dark:text-red-400">₹{formatINR(totalBorrowedPending)}</span>
+              </div>
+
+              {/* Export Actions (Excel & PDF) */}
+              <ExportActions exportOptions={borrowExportOptions} />
+
+              {/* Add Loan Button */}
+              <Button
+                onClick={handleOpenNew}
+                className="h-8 px-3 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white font-medium shadow-xs flex items-center gap-1.5 rounded-lg text-xs cursor-pointer transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add Loan
+              </Button>
+
+              {/* Import Excel / CSV Button */}
+              <Button
+                onClick={() => setIsImportModalOpen(true)}
+                variant="outline"
+                className="h-8 px-2.5 border-emerald-300 dark:border-emerald-800/80 bg-emerald-50/60 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/60 font-medium shadow-2xs flex items-center gap-1.5 rounded-lg text-xs cursor-pointer transition-colors"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                Import
+              </Button>
+            </div>
           </div>
-
-          {/* Add Loan Button */}
-          <Button
-            onClick={handleOpenNew}
-            className="h-8 px-3.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white font-medium shadow-xs flex items-center gap-1.5 rounded-lg text-xs cursor-pointer transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add Loan / Borrow
-          </Button>
-
-          {/* Import Excel / CSV Button */}
-          <Button
-            onClick={() => setIsImportModalOpen(true)}
-            variant="outline"
-            className="h-8 px-3 border-emerald-300 dark:border-emerald-800/80 bg-emerald-50/60 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/60 font-medium shadow-2xs flex items-center gap-1.5 rounded-lg text-xs cursor-pointer transition-colors"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-            Import Excel / CSV
-          </Button>
         </div>
+
+        {/* Active Chips & Counter */}
+        <FilterChipsBar
+          chips={activeChips}
+          onClearAll={handleClearAllFilters}
+          filteredCount={filtered.length}
+          totalCount={borrowRecords.length}
+          itemNoun="debt records"
+        />
       </div>
 
       {/* Records Table */}

@@ -6,6 +6,8 @@ import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { DataImportModal, FieldDefinition } from './common/DataImportModal';
+import { ExportActions } from './common/ExportActions';
+import { ExportColumn, formatCurrencyForPdf } from '../utils/dataExport';
 
 interface ItemsCatalogProps {
   catalog: CatalogItem[];
@@ -81,6 +83,36 @@ export const ItemsCatalog: React.FC<ItemsCatalogProps> = ({ catalog, onRefresh }
     }
   };
 
+  const avgRate = catalog.length
+    ? catalog.reduce((s, i) => s + (i.default_rate || 0), 0) / catalog.length
+    : 0;
+
+  const catalogExportColumns: ExportColumn<CatalogItem>[] = [
+    { header: 'Item / Service Name', key: 'name', width: 28, align: 'left' },
+    { header: 'Description / Scope', key: 'description', width: 36, align: 'left', format: (v) => v || '-' },
+    {
+      header: 'Default Rate',
+      key: 'default_rate',
+      width: 16,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val || 0),
+    },
+  ];
+
+  const catalogExportOptions = {
+    filename: `Items_Catalog_${new Date().toISOString().slice(0, 10)}`,
+    title: 'Items & Services Pricing Catalog',
+    subtitle: `Standard rates catalog with ${catalog.length} items`,
+    sheetName: 'Catalog',
+    columns: catalogExportColumns,
+    data: catalog,
+    summaryMetrics: [
+      { label: 'Total Catalog Items', value: catalog.length },
+      { label: 'Average Unit Price', value: formatCurrencyForPdf(avgRate) },
+    ],
+  };
+
   return (
     <div className="p-8  space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -91,6 +123,7 @@ export const ItemsCatalog: React.FC<ItemsCatalogProps> = ({ catalog, onRefresh }
           </p>
         </div>
         <div className="flex items-center gap-2.5">
+          <ExportActions exportOptions={catalogExportOptions} size="default" />
           <Button
             onClick={() => setIsImportModalOpen(true)}
             variant="outline"

@@ -15,6 +15,7 @@ import { BorrowPage } from './components/budget/BorrowPage';
 import { ReturnsPage } from './components/budget/ReturnsPage';
 import { SpreadsheetPage } from './components/budget/SpreadsheetPage';
 import { AllocationsPage } from './components/budget/AllocationsPage';
+import { ComparisonPage } from './components/budget/ComparisonPage';
 import { GoalsPage } from './components/budget/GoalsPage';
 import { TaxPortal } from './components/tax/TaxPortal';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
@@ -283,6 +284,8 @@ export const AppContent: React.FC = () => {
         return 'Returns (Money Repaid to Me)';
       case 'allocations':
         return '100% Allocation Envelopes';
+      case 'compare':
+        return 'Period & Budget Comparison';
       case 'expenses':
         return 'Expense Ledger';
       case 'income':
@@ -457,6 +460,10 @@ export const AppContent: React.FC = () => {
 
               {currentTab === 'allocations' && (
                 <AllocationsPage />
+              )}
+
+              {currentTab === 'compare' && (
+                <ComparisonPage />
               )}
 
               {currentTab === 'expenses' && (

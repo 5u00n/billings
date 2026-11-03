@@ -25,8 +25,15 @@ import {
   ChevronDown,
   ChevronUp,
   FileSpreadsheet,
+  Search,
+  Banknote,
+  ArrowUpDown,
 } from 'lucide-react';
 import { DataImportModal, FieldDefinition } from '../common/DataImportModal';
+import { DistinctDropdownFilter, DistinctFilterOption } from '../common/DistinctDropdownFilter';
+import { FilterChipsBar, ActiveFilterChip } from '../common/FilterChipsBar';
+import { ExportActions } from '../common/ExportActions';
+import { ExportColumn, formatCurrencyForPdf } from '../../utils/dataExport';
 
 interface IncomeViewProps {
   incomes: IncomeEntry[];
@@ -129,6 +136,13 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
   const [withdrawNotes, setWithdrawNotes] = useState('');
   const [withdrawError, setWithdrawError] = useState<string | null>(null);
   const [withdrawing, setWithdrawing] = useState(false);
+
+  // Income Ledger Filter State
+  const [incomeSearch, setIncomeSearch] = useState('');
+  const [selectedIncomeCategory, setSelectedIncomeCategory] = useState<string>('all');
+  const [selectedIncomeSource, setSelectedIncomeSource] = useState<string>('all');
+  const [selectedIncomeAmountBand, setSelectedIncomeAmountBand] = useState<string>('all');
+  const [incomeSortBy, setIncomeSortBy] = useState<string>('date_desc');
 
   // Load Current Account record
   const fetchCurrentAccount = async () => {
@@ -340,6 +354,175 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
       default:
         return { label: 'Other', color: 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300' };
     }
+  };
+
+  // Dynamic distinct source options with counts
+  const incomeSourceCounts = safeIncomes.reduce((acc, inc) => {
+    if (inc.source) acc[inc.source] = (acc[inc.source] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const incomeSourceOptions: DistinctFilterOption[] = Object.entries(incomeSourceCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([src, count]) => ({ value: src, label: src, count }));
+
+  // Distinct category options with counts
+  const incomeCategoryCounts = safeIncomes.reduce((acc, inc) => {
+    acc[inc.category] = (acc[inc.category] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const incomeCategoryOptions: DistinctFilterOption[] = [
+    { value: 'fl', label: 'Freelance (fl)', count: incomeCategoryCounts['fl'] || 0 },
+    { value: 'sal', label: 'Salary (sal)', count: incomeCategoryCounts['sal'] || 0 },
+    { value: 'ext', label: 'Allowance / Ext', count: incomeCategoryCounts['ext'] || 0 },
+    { value: 'saving', label: 'Savings Withdrawal', count: incomeCategoryCounts['saving'] || 0 },
+    { value: 'rt', label: 'Returned to Me', count: incomeCategoryCounts['rt'] || 0 },
+  ].filter((opt) => opt.count! > 0 || incomeCategoryCounts[opt.value] !== undefined);
+
+  // Amount band options with counts
+  const incomeAmountBandOptions: DistinctFilterOption[] = [
+    { value: 'under_5k', label: 'Under ₹5,000', count: safeIncomes.filter((i) => i.amount < 5000).length },
+    { value: '5k_25k', label: '₹5,000 – ₹25,000', count: safeIncomes.filter((i) => i.amount >= 5000 && i.amount <= 25000).length },
+    { value: '25k_100k', label: '₹25,000 – ₹1,00,000', count: safeIncomes.filter((i) => i.amount > 25000 && i.amount <= 100000).length },
+    { value: 'above_100k', label: 'Above ₹1,00,000', count: safeIncomes.filter((i) => i.amount > 100000).length },
+  ];
+
+  const incomeSortOptions: DistinctFilterOption[] = [
+    { value: 'date_desc', label: 'Date: Newest First' },
+    { value: 'date_asc', label: 'Date: Oldest First' },
+    { value: 'amount_desc', label: 'Amount: High to Low' },
+    { value: 'amount_asc', label: 'Amount: Low to High' },
+  ];
+
+  // Filtered income streams
+  const filteredIncomes = safeIncomes
+    .filter((inc) => {
+      if (selectedIncomeCategory !== 'all' && inc.category !== selectedIncomeCategory) return false;
+      if (selectedIncomeSource !== 'all' && inc.source !== selectedIncomeSource) return false;
+
+      // Amount band
+      if (selectedIncomeAmountBand === 'under_5k' && inc.amount >= 5000) return false;
+      if (selectedIncomeAmountBand === '5k_25k' && (inc.amount < 5000 || inc.amount > 25000)) return false;
+      if (selectedIncomeAmountBand === '25k_100k' && (inc.amount < 25000 || inc.amount > 100000)) return false;
+      if (selectedIncomeAmountBand === 'above_100k' && inc.amount <= 100000) return false;
+
+      if (incomeSearch.trim()) {
+        const q = incomeSearch.toLowerCase();
+        const matchSource = inc.source.toLowerCase().includes(q);
+        const matchNotes = inc.notes?.toLowerCase().includes(q);
+        if (!matchSource && !matchNotes) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (incomeSortBy === 'date_asc') return a.date.localeCompare(b.date);
+      if (incomeSortBy === 'amount_desc') return b.amount - a.amount;
+      if (incomeSortBy === 'amount_asc') return a.amount - b.amount;
+      return b.date.localeCompare(a.date);
+    });
+
+  // Active filter chips
+  const activeIncomeChips: ActiveFilterChip[] = [];
+  if (selectedIncomeCategory !== 'all') {
+    const opt = incomeCategoryOptions.find((o) => o.value === selectedIncomeCategory);
+    activeIncomeChips.push({
+      key: 'category',
+      label: 'Category',
+      valueDisplay: opt ? opt.label : selectedIncomeCategory,
+      onRemove: () => setSelectedIncomeCategory('all'),
+    });
+  }
+  if (selectedIncomeSource !== 'all') {
+    activeIncomeChips.push({
+      key: 'source',
+      label: 'Source',
+      valueDisplay: selectedIncomeSource,
+      onRemove: () => setSelectedIncomeSource('all'),
+    });
+  }
+  if (selectedIncomeAmountBand !== 'all') {
+    const opt = incomeAmountBandOptions.find((o) => o.value === selectedIncomeAmountBand);
+    activeIncomeChips.push({
+      key: 'amount',
+      label: 'Amount',
+      valueDisplay: opt ? opt.label : selectedIncomeAmountBand,
+      onRemove: () => setSelectedIncomeAmountBand('all'),
+    });
+  }
+  if (incomeSearch.trim()) {
+    activeIncomeChips.push({
+      key: 'search',
+      label: 'Search',
+      valueDisplay: `"${incomeSearch.trim()}"`,
+      onRemove: () => setIncomeSearch(''),
+    });
+  }
+
+  const handleClearAllIncomeFilters = () => {
+    setSelectedIncomeCategory('all');
+    setSelectedIncomeSource('all');
+    setSelectedIncomeAmountBand('all');
+    setIncomeSearch('');
+  };
+
+  const totalFilteredInflow = filteredIncomes.reduce((s, i) => s + (i.amount || 0), 0);
+
+  const incomeExportColumns: ExportColumn<IncomeEntry>[] = [
+    { header: 'Date', key: 'date', width: 12, align: 'center' },
+    { header: 'Payer / Source', key: 'source', width: 24, align: 'left' },
+    {
+      header: 'Stream / Category',
+      key: 'category',
+      width: 18,
+      align: 'center',
+      format: (val) => {
+        if (val === 'fl') return 'Freelance (fl)';
+        if (val === 'sal') return 'Salary (sal)';
+        if (val === 'ext') return 'Allowance / Ext';
+        if (val === 'saving') return 'Savings Withdrawal';
+        if (val === 'rt') return 'Returned to Me';
+        return String(val || 'Other');
+      },
+    },
+    {
+      header: 'Amount',
+      key: 'amount',
+      width: 15,
+      align: 'right',
+      isNumeric: true,
+      formatPdf: (val) => formatCurrencyForPdf(val),
+    },
+    {
+      header: 'Taxable',
+      key: 'is_taxable',
+      width: 12,
+      align: 'center',
+      format: (val) => (val === 0 || val === false ? 'No' : 'Yes'),
+    },
+    {
+      header: 'Notes / Memo',
+      key: 'notes',
+      width: 24,
+      align: 'left',
+      format: (val) => val || '',
+    },
+  ];
+
+  const incomeExportOptions = {
+    filename: `Income_Ledger_${currentMonth || 'all'}_${new Date().toISOString().slice(0, 10)}`,
+    title: `Personal Income Streams - ${currentMonth || 'All Time'}`,
+    subtitle: `Exported ${filteredIncomes.length} income entries matching applied filters`,
+    sheetName: 'Incomes',
+    columns: incomeExportColumns,
+    data: filteredIncomes,
+    summaryMetrics: [
+      { label: 'Total Filtered Inflow', value: formatCurrencyForPdf(totalFilteredInflow) },
+      { label: 'Freelance Draws', value: formatCurrencyForPdf(freelanceTotal) },
+      { label: 'Developer Salary', value: formatCurrencyForPdf(salaryTotal) },
+      { label: 'Extra & Savings', value: formatCurrencyForPdf(extraTotal + savingsTotal) },
+      { label: 'Entries Exported', value: `${filteredIncomes.length} of ${safeIncomes.length}` },
+    ],
   };
 
   const availableBalance = currentAccount?.available_balance ?? (currentAccount as any)?.currentBalance ?? 0;
@@ -646,8 +829,9 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
       </div>
 
       {/* ----------------- PERSONAL INCOME LEDGER TABLE ----------------- */}
-      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
-        <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden space-y-0">
+        {/* Table Header & Metrics */}
+        <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
               Personal Income Streams for {currentMonth}
@@ -656,9 +840,86 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
               Recorded personal cash flow (Withdrawals from Current Account, Developer Salary, Allowance, Savings)
             </p>
           </div>
-          <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-3 py-1 rounded-full">
-            Total Inflow: ₹{formatINR(safeIncomes.reduce((s, i) => s + i.amount, 0))}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-3 py-1 rounded-full">
+              Filtered Inflow: ₹{formatINR(totalFilteredInflow)}
+            </span>
+            <ExportActions exportOptions={incomeExportOptions} />
+          </div>
+        </div>
+
+        {/* Distinct Dropdown Filters Bar */}
+        <div className="p-4 bg-slate-50/50 dark:bg-slate-800/40 border-b border-slate-100 dark:border-slate-800 space-y-3">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            {/* Search Box */}
+            <div className="relative w-full lg:w-72">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={incomeSearch}
+                onChange={(e) => setIncomeSearch(e.target.value)}
+                placeholder="Search payer, client, notes..."
+                className="w-full pl-9 pr-3 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Category Filter */}
+              <DistinctDropdownFilter
+                label="Stream"
+                icon={Briefcase}
+                value={selectedIncomeCategory}
+                onChange={setSelectedIncomeCategory}
+                options={incomeCategoryOptions}
+                allLabel="All Streams"
+              />
+
+              {/* Source Filter */}
+              {incomeSourceOptions.length > 0 && (
+                <DistinctDropdownFilter
+                  label="Payer"
+                  icon={Building}
+                  value={selectedIncomeSource}
+                  onChange={setSelectedIncomeSource}
+                  options={incomeSourceOptions}
+                  allLabel="All Payers"
+                />
+              )}
+
+              {/* Amount Band Filter */}
+              <DistinctDropdownFilter
+                label="Amount"
+                icon={Banknote}
+                value={selectedIncomeAmountBand}
+                onChange={setSelectedIncomeAmountBand}
+                options={incomeAmountBandOptions}
+                allLabel="Any Amount"
+              />
+
+              {/* Sort Filter */}
+              <DistinctDropdownFilter
+                label="Sort"
+                icon={ArrowUpDown}
+                value={incomeSortBy}
+                onChange={setIncomeSortBy}
+                options={incomeSortOptions}
+                allLabel="Date: Newest"
+                align="right"
+              />
+
+              {/* Export Actions (Excel & PDF) */}
+              <ExportActions exportOptions={incomeExportOptions} />
+            </div>
+          </div>
+
+          {/* Active Chips & Counter */}
+          <FilterChipsBar
+            chips={activeIncomeChips}
+            onClearAll={handleClearAllIncomeFilters}
+            filteredCount={filteredIncomes.length}
+            totalCount={safeIncomes.length}
+            itemNoun="income entries"
+          />
         </div>
 
         <div className="overflow-x-auto">
@@ -674,15 +935,15 @@ export const IncomeView: React.FC<IncomeViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {safeIncomes.length === 0 ? (
+              {filteredIncomes.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-slate-400">
                     <PiggyBank className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600 mb-2" />
-                    No income streams logged for this month yet.
+                    No income streams match your filters.
                   </td>
                 </tr>
               ) : (
-                safeIncomes.map((inc) => {
+                filteredIncomes.map((inc) => {
                   const meta = getCategoryLabel(inc.category);
                   const isCurrentAccountDraw = inc.source.includes('Current Account') || (inc.notes && inc.notes.includes('Current Account'));
 

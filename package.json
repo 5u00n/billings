@@ -10,7 +10,9 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "build": "vite build && node scripts/build-service-worker.mjs",
     "deploy": "npm run build && wrangler deploy",
-    "start": "tsx server/index.ts"
+    "start": "tsx server/index.ts",
+    "test:borrowing": "node --import tsx tests/borrowing.test.ts",
+    "test:borrowing:d1": "node scripts/test-borrowing-d1.mjs"
   },
   "keywords": [],
   "author": "",

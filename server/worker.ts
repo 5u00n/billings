@@ -1,3 +1,5 @@
+import { borrowingRouter } from './borrowing/router';
+import { d1Store } from './borrowing/store';
 export interface D1Result<T = any> {
   results: T[];
   success: boolean;
@@ -296,6 +298,12 @@ export default {
       const method = request.method.toUpperCase();
 
       try {
+        if (url.pathname.startsWith('/api/budget/')) {
+          const isLedger = url.pathname === '/api/budget/borrowing-accounts' || url.pathname.startsWith('/api/budget/borrowing-accounts/');
+          const body = (isLedger && method === 'POST') || (url.pathname.startsWith('/api/budget/summary/') && method === 'PUT') ? await request.json() : {};
+          const result = await borrowingRouter(d1Store(db), method, url, body, request.headers.get('Idempotency-Key') || '');
+          if (result) return jsonResponse(result.data, result.status);
+        }
         // --- AUTH VERIFICATION ---
         if (url.pathname === '/api/auth/verify' && method === 'GET') {
           return jsonResponse({

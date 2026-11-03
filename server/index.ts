@@ -1,3 +1,5 @@
+import { borrowingRouter } from './borrowing/router';
+import { sqliteStore } from './borrowing/store';
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -115,6 +117,14 @@ app.use((_req, res, next) => {
 });
 
 app.use(express.json({ limit: '15mb' }));
+
+// Shared account ledger API; legacy routes below remain available for unmigrated data.
+const accountLedgerStore = sqliteStore(db);
+app.use('/api/budget', async (req: Request, res: Response, next) => {
+  const result = await borrowingRouter(accountLedgerStore, req.method, new URL(req.originalUrl, 'http://localhost'), req.body, String(req.headers['idempotency-key'] || ''));
+  if (result) return res.status(result.status).json(result.data);
+  next();
+});
 
 // ----------------- PUBLIC RUNTIME CONFIG & AUTH -----------------
 

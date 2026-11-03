@@ -1,5 +1,5 @@
 import { getCurrentBudgetMonth } from '../../lib/budgetMonth';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   MonthlyBudgetSummary,
   Expense,
@@ -40,11 +40,11 @@ interface PrintableMonthlyReportProps {
 }
 
 export const PrintableMonthlyReport: React.FC<PrintableMonthlyReportProps> = ({
-  summary,
-  expenses,
-  incomes,
-  borrows,
-  allocations,
+  summary: initialSummary,
+  expenses: initialExpenses,
+  incomes: initialIncomes,
+  borrows: initialBorrows,
+  allocations: initialAllocations,
   profile,
   monthStr,
   availableMonths,
@@ -53,6 +53,20 @@ export const PrintableMonthlyReport: React.FC<PrintableMonthlyReportProps> = ({
 }) => {
   // Mode: specific month or 'ALL'
   const [selectedReportPeriod, setSelectedReportPeriod] = useState<string>(monthStr || getCurrentBudgetMonth());
+
+  const [reportBundle, setReportBundle] = useState({summary:initialSummary,expenses:initialExpenses,incomes:initialIncomes,borrows:initialBorrows,allocations:initialAllocations,account_transactions:[] as any[]});
+  const [reportError, setReportError] = useState('');
+  const [reportLoading, setReportLoading] = useState(false);
+  const {summary,expenses,incomes,borrows,allocations} = reportBundle;
+  useEffect(() => {
+    let active = true;
+    setReportLoading(true);
+    fetch(`/api/budget/month-bundle?month=${selectedReportPeriod === 'ALL' ? 'all' : selectedReportPeriod}`).then(async response => {
+      if (!response.ok) throw new Error('Could not load report records');
+      return response.json();
+    }).then(bundle => {if(active){setReportBundle(bundle);setReportError('');}}).catch(error=>{if(active)setReportError(error.message);}).finally(()=>{if(active)setReportLoading(false);});
+    return () => {active=false;};
+  }, [selectedReportPeriod]);
 
   // Compute 1st day and last day of a month string (YYYY-MM)
   const getMonthDateRange = (mStr: string) => {
@@ -86,13 +100,14 @@ export const PrintableMonthlyReport: React.FC<PrintableMonthlyReportProps> = ({
   };
 
   const handlePrint = () => {
-    window.print();
+    if (!reportLoading && !reportError) window.print();
   };
 
   // Filter transactions according to selected range
   const filteredExpenses = useMemo(() => {
-    if (selectedReportPeriod === 'ALL' && !startDate && !endDate) return expenses;
+    if (selectedReportPeriod === 'ALL' && !startDate && !endDate) return expenses.filter(e => !e.linked_borrow_id && !/debt|payback/i.test(e.tag || ''));
     return expenses.filter((e) => {
+      if (e.linked_borrow_id || /debt|payback/i.test(e.tag || '')) return false;
       if (startDate && e.date < startDate) return false;
       if (endDate && e.date > endDate) return false;
       return true;
@@ -128,25 +143,18 @@ export const PrintableMonthlyReport: React.FC<PrintableMonthlyReportProps> = ({
     });
   }, [borrows, selectedReportPeriod, startDate, endDate]);
 
-  // Aggregate values
-  const totalExp = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
-  const totalIncEarned = filteredIncomes.reduce((sum, i) => sum + i.amount, 0);
-  const totalReturnsCollected = filteredReturns
-    .filter((r) => r.status === 'SETTLED')
-    .reduce((sum, r) => sum + r.amount, 0);
-
-  const prevCarried = selectedReportPeriod === 'ALL' ? 0 : (summary.previous_remaining || 0);
-  const totalAvailableInflow = prevCarried + totalIncEarned + totalReturnsCollected;
-
+  // Use the same ledger totals as the dashboard; never recalculate debt or auto-stash savings here.
+  const totalExp = summary.total_expense || 0;
+  const totalIncEarned = summary.total_income_earned || 0;
+  const totalReturnsCollected = summary.returns || 0;
+  const prevCarried = summary.previous_remaining || 0;
+  const totalAvailableInflow = summary.total_inflow || 0;
   const debtRepaid = summary.dept_payment || 0;
-  const newBorrowed = filteredDebts
-    .filter((d) => d.type === 'BORROW')
-    .reduce((sum, d) => sum + d.amount, 0);
-
-  const netSurplus = (totalAvailableInflow + newBorrowed) - (totalExp + debtRepaid);
-  const stashedSavings = netSurplus > 0 ? Math.round(netSurplus / 2) : 0;
-  const nextMonthCarry = netSurplus - stashedSavings;
-  const endingDebt = (summary.starting_debt || 0) + newBorrowed - debtRepaid;
+  const newBorrowed = summary.borrow_amount || 0;
+  const netSurplus = summary.overhead || 0;
+  const stashedSavings = summary.total_savings || 0;
+  const nextMonthCarry = summary.remaining || 0;
+  const endingDebt = summary.ending_debt || 0;
 
   // Format month for label
   const formatPeriodDisplay = () => {
@@ -162,6 +170,7 @@ export const PrintableMonthlyReport: React.FC<PrintableMonthlyReportProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex flex-col overflow-hidden print:static print:bg-white print:overflow-visible print:p-0">
+      {(reportLoading || reportError) && <p role="status" className="bg-white p-3 text-slate-900">{reportError || 'Loading ledger report…'}</p>}
       {/* Top Non-Print Toolbar with Date & Period Selectors */}
       <div className="bg-white border-b border-slate-200 px-6 py-3 flex flex-wrap items-center justify-between no-print shadow-xs shrink-0 gap-3">
         <div className="flex items-center gap-3">
@@ -486,6 +495,7 @@ export const PrintableMonthlyReport: React.FC<PrintableMonthlyReportProps> = ({
               </table>
             </div>
 
+            {reportBundle.account_transactions?.length > 0 && <div><h3 style={{fontWeight:800,fontSize:11}}>Borrowing account transactions</h3><table style={{width:'100%',fontSize:10,textAlign:'left'}}><thead><tr><th>Date</th><th>Description</th><th>Type</th><th>Debt change</th><th>Cash change</th></tr></thead><tbody>{reportBundle.account_transactions.map(t=><tr key={t.id}><td>{t.date}</td><td>{t.description}</td><td>{t.kind}</td><td>₹{formatINR(t.debt_delta_paise/100)}</td><td>₹{formatINR(t.cash_delta_paise/100)}</td></tr>)}</tbody></table></div>}
             {/* Section 5: Itemized Living Expenses */}
             <div>
               <div style={{ fontSize: '10px', fontWeight: '800', color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>

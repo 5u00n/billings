@@ -110,7 +110,9 @@ export const offlineCache = {
    * Cleans up dependent queries so UI never shows stale data after an edit/add/delete.
    */
   invalidateOnMutation(mutationUrl: string): void {
-    if (mutationUrl.includes('/api/budget/expenses')) {
+    if (mutationUrl.includes('/api/budget/borrowing-accounts')) {
+      offlineCache.invalidate('/api/budget/');
+    } else if (mutationUrl.includes('/api/budget/expenses')) {
       offlineCache.invalidate('/api/budget/expenses');
       offlineCache.invalidate('/api/budget/borrow');
       offlineCache.invalidate('/api/budget/months');

@@ -171,6 +171,8 @@ export interface Expense {
   has_invoice_voucher?: boolean;
   voucher_ref?: string;
   linked_borrow_id?: string;
+  borrowing_transaction_id?: string;
+  borrowing_account_id?: string;
   created_at?: string;
 }
 
@@ -336,6 +338,7 @@ export interface CurrentAccountStatus {
 export type BorrowType = 'BORROW' | 'RETURN' | 'LENT';
 
 export interface BorrowRecord {
+  migrated_account_id?: string;
   id: string;
   date: string;
   month: string;
@@ -348,6 +351,13 @@ export interface BorrowRecord {
 }
 
 export interface MonthlyBudgetSummary {
+  total_income_earned?: number;
+  cash_expense?: number;
+  credit_expense?: number;
+  managed_debt?: number;
+  legacy_debt?: number;
+  account_credit?: number;
+  sources?: Record<string, unknown>;
   month: string; // e.g. '2026-10' or 'Oct'
   starting_debt: number;
   previous_remaining: number;

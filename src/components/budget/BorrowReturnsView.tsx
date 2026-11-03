@@ -239,7 +239,7 @@ export const BorrowReturnsView: React.FC<BorrowReturnsViewProps> = ({
   };
 
   // Separate loans/borrowed debts from returns (returns are now in their own tab)
-  const borrowRecords = records.filter((r) => r.type !== 'RETURN');
+  const borrowRecords = records.filter((r) => r.type !== 'RETURN' && !r.migrated_account_id);
 
   const filtered = borrowRecords.filter((r) => {
     if (filterType !== 'ALL' && r.type !== filterType) return false;

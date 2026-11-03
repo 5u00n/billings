@@ -1,3 +1,5 @@
+import { BorrowingAccountSelector, AccountPaymentDialog, AccountCorrectionDialog, borrowingRequest, announceBorrowingChange } from './BorrowingAccountsView';
+import type { BorrowingTransaction } from '../../lib/borrowing';
 import React, { useState, useEffect } from 'react';
 import { Expense, ExpenseCategory, BorrowRecord } from '../../types';
 import { formatINR } from '../../utils/numberToWords';
@@ -164,8 +166,9 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
   const [saving, setSaving] = useState(false);
 
   // Credit Card borrow options
-  const [createCcBorrow, setCreateCcBorrow] = useState(true);
-  const [borrowEntity, setBorrowEntity] = useState('Credit Card');
+  const [borrowingAccountId, setBorrowingAccountId] = useState('');
+  const [accountCorrection, setAccountCorrection] = useState<{accountId:string;transaction:BorrowingTransaction}|null>(null);
+  const [expenseRequestKey, setExpenseRequestKey] = useState(() => crypto.randomUUID());
 
   // Payback options
   const [paybackSourceType, setPaybackSourceType] = useState<'EXISTING' | 'NEW'>('EXISTING');
@@ -221,8 +224,8 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
     setPaymentMethod('UPI / Bank');
     setNotes('');
     setEditingExpense(null);
-    setCreateCcBorrow(true);
-    setBorrowEntity('Credit Card');
+    setBorrowingAccountId('');
+    setExpenseRequestKey(crypto.randomUUID());
     setPaybackSourceType('EXISTING');
     setSelectedBorrowId('');
     setSettleBorrow(true);
@@ -256,7 +259,16 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
     }
   };
 
-  const handleOpenEdit = (exp: Expense) => {
+  const handleOpenEdit = async (exp: Expense) => {
+    if (exp.borrowing_account_id && exp.borrowing_transaction_id) {
+      try {
+        const account = await borrowingRequest('/' + exp.borrowing_account_id);
+        const transaction = account.transactions.find((t: BorrowingTransaction) => t.id === exp.borrowing_transaction_id);
+        if (!transaction) throw new Error('Account transaction not found');
+        setAccountCorrection({accountId: account.id, transaction});
+      } catch (e: any) { alert(e.message); }
+      return;
+    }
     setEditingExpense(exp);
     setDate(exp.date);
     setCategory(exp.category);
@@ -264,9 +276,7 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
     setDescription(exp.description);
     setAmount(exp.amount);
     setPaymentMethod(exp.payment_method || 'UPI / Bank');
-    if (['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(exp.payment_method || '')) {
-      setBorrowEntity(exp.payment_method!);
-    }
+
     setNotes(exp.notes || '');
     if (exp.tag?.toLowerCase().includes('debt') || exp.tag?.toLowerCase().includes('payback') || exp.linked_borrow_id) {
       setEntryMode('PAYBACK');
@@ -327,14 +337,16 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
           payload.is_new_borrow_payback = true;
           payload.payback_person = newPaybackPerson.trim();
         }
-      } else {
-        if (['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(paymentMethod)) {
-          payload.create_borrow = createCcBorrow;
-          payload.borrow_entity = borrowEntity.trim() || paymentMethod;
-        }
       }
 
-      if (editingExpense) {
+      if (editingExpense && (paymentMethod === 'Borrowing account' || ['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(paymentMethod)) !== ['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(editingExpense.payment_method || '')) {
+        throw new Error('Changing the funding source of a legacy expense requires reconciliation. Convert the record through borrowing accounts first.');
+      }
+      if (!editingExpense && entryMode === 'EXPENSE' && paymentMethod === 'Borrowing account') {
+        if (!borrowingAccountId) throw new Error('Select or create a borrowing account for this credit purchase.');
+        await borrowingRequest(`/${borrowingAccountId}/transactions`, {kind:'CREDIT_PURCHASE', amount_paise:Math.round(Number(amount)*100), date, description:description.trim(), notes:notes.trim(), category, tag:tag.trim()}, expenseRequestKey);
+        announceBorrowingChange();
+      } else if (editingExpense) {
         const res = await fetch(`/api/budget/expenses/${editingExpense.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -369,6 +381,12 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this expense entry?')) return;
     try {
+      const expense = expenses.find(e => e.id === id);
+      if (expense?.borrowing_account_id && expense.borrowing_transaction_id) {
+        const account = await borrowingRequest('/' + expense.borrowing_account_id);
+        await borrowingRequest(`/${account.id}/transactions/${expense.borrowing_transaction_id}`, {reverse_only:true,reason:'Expense removed by owner',expected_version:account.version});
+        announceBorrowingChange();onRefresh();return;
+      }
       const res = await fetch(`/api/budget/expenses/${id}`, { method: 'DELETE' });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -655,7 +673,9 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
       </div>
 
       {/* Add / Edit Expense & Payback Modal */}
-      {isModalOpen && (
+      {isModalOpen && entryMode === 'PAYBACK' && <AccountPaymentDialog onClose={handleCloseModal} onSaved={() => onRefresh()} />}
+      {accountCorrection && <AccountCorrectionDialog accountId={accountCorrection.accountId} transaction={accountCorrection.transaction} onClose={() => setAccountCorrection(null)} onSaved={() => onRefresh()} />}
+      {isModalOpen && !['PAYBACK'].includes(entryMode) && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-2xs flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             {/* Modal Header */}
@@ -1007,92 +1027,22 @@ export const ExpenseLogView: React.FC<ExpenseLogViewProps> = ({
                     <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Payment Method</label>
                     <select
                       value={paymentMethod}
-                      onChange={(e) => {
-                        const nextMethod = e.target.value;
-                        setPaymentMethod(nextMethod);
-                        if (['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(nextMethod)) {
-                          if (!borrowEntity || ['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(borrowEntity)) {
-                            setBorrowEntity(nextMethod);
-                          }
-                        }
-                      }}
+                      onChange={(e) => setPaymentMethod(e.target.value)}
                       className="w-full px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 bg-white dark:bg-slate-800 text-slate-900 dark:text-white cursor-pointer"
                     >
                       <option value="UPI / Bank">UPI / Google Pay / PhonePe</option>
                       <option value="Cash">Cash</option>
-                      <option value="Credit Card">Credit Card (Auto-recorded as Borrow)</option>
-                      <option value="Slice Borrow">Slice Borrow (Auto-recorded as Borrow)</option>
-                      <option value="Amazon Borrow">Amazon Borrow (Auto-recorded as Borrow)</option>
+                      {!editingExpense && <option value="Borrowing account">Borrowing account</option>}
+                      {editingExpense && ['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(editingExpense.payment_method || '') && (
+                        <option value={editingExpense.payment_method}>{editingExpense.payment_method} (legacy)</option>
+                      )}
                       <option value="Debit Card">Debit Card</option>
                       <option value="Net Banking">Net Banking</option>
                     </select>
                   </div>
 
-                  {/* Borrow Liability Automation Banner (Credit Card, Slice Borrow, Amazon Borrow) */}
-                  {['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(paymentMethod) && (
-                    <div className={`p-3 border rounded-xl space-y-2 ${
-                      paymentMethod === 'Slice Borrow'
-                        ? 'bg-purple-50 dark:bg-purple-950/40 border-purple-200 dark:border-purple-900/60'
-                        : paymentMethod === 'Amazon Borrow'
-                        ? 'bg-orange-50 dark:bg-orange-950/40 border-orange-200 dark:border-orange-900/60'
-                        : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900/60'
-                    }`}>
-                      <div className="flex items-start gap-2">
-                        <CreditCard className={`w-4 h-4 mt-0.5 shrink-0 ${
-                          paymentMethod === 'Slice Borrow'
-                            ? 'text-purple-600 dark:text-purple-400'
-                            : paymentMethod === 'Amazon Borrow'
-                            ? 'text-orange-600 dark:text-orange-400'
-                            : 'text-amber-600 dark:text-amber-400'
-                        }`} />
-                        <div className={`text-[11px] leading-tight ${
-                          paymentMethod === 'Slice Borrow'
-                            ? 'text-purple-800 dark:text-purple-300'
-                            : paymentMethod === 'Amazon Borrow'
-                            ? 'text-orange-800 dark:text-orange-300'
-                            : 'text-amber-800 dark:text-amber-300'
-                        }`}>
-                          <span className="font-bold">{paymentMethod} Liability:</span> Since this expense is paid via {paymentMethod}, it will automatically be recorded as an active liability under <strong>Loans & Debts (Borrow)</strong> so you can track paying it back.
-                        </div>
-                      </div>
-                      <div className={`flex items-center justify-between pt-1 border-t ${
-                        paymentMethod === 'Slice Borrow'
-                          ? 'border-purple-200/60 dark:border-purple-900/40'
-                          : paymentMethod === 'Amazon Borrow'
-                          ? 'border-orange-200/60 dark:border-orange-900/40'
-                          : 'border-amber-200/60 dark:border-amber-900/40'
-                      }`}>
-                        <label className={`flex items-center gap-1.5 text-xs font-semibold cursor-pointer ${
-                          paymentMethod === 'Slice Borrow'
-                            ? 'text-purple-900 dark:text-purple-200'
-                            : paymentMethod === 'Amazon Borrow'
-                            ? 'text-orange-900 dark:text-orange-200'
-                            : 'text-amber-900 dark:text-amber-200'
-                        }`}>
-                          <input
-                            type="checkbox"
-                            checked={createCcBorrow}
-                            onChange={(e) => setCreateCcBorrow(e.target.checked)}
-                            className="rounded text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer"
-                          />
-                          <span>Auto-record as Borrow</span>
-                        </label>
-                        <input
-                          type="text"
-                          value={borrowEntity}
-                          onChange={(e) => setBorrowEntity(e.target.value)}
-                          placeholder={
-                            paymentMethod === 'Slice Borrow'
-                              ? 'e.g. Slice'
-                              : paymentMethod === 'Amazon Borrow'
-                              ? 'e.g. Amazon Pay Later'
-                              : 'Card / lender entity'
-                          }
-                          className="px-2 py-0.5 text-[11px] bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-700 rounded w-40 focus:outline-none"
-                          title="Lender / Account Entity Name"
-                        />
-                      </div>
-                    </div>
+                  {!editingExpense && paymentMethod === 'Borrowing account' && (
+                    <BorrowingAccountSelector value={borrowingAccountId} onChange={setBorrowingAccountId} />
                   )}
                 </>
               )}

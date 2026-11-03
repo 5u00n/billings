@@ -1,3 +1,4 @@
+import { BorrowingAccountsView } from './BorrowingAccountsView';
 import { getCurrentBudgetMonth, includeCurrentBudgetMonth, useBudgetMonth } from '../../lib/budgetMonth';
 import React, { useState, useEffect } from 'react';
 import { BorrowRecord } from '../../types';
@@ -123,10 +124,13 @@ export const BorrowPage: React.FC = () => {
       </div>
 
       {/* Borrow Returns View */}
+      <BorrowingAccountsView onRefresh={() => handleRefresh()} />
+      <details className="border rounded-xl p-4"><summary className="font-semibold cursor-pointer">Legacy loans and lending records</summary>
       <BorrowReturnsView
         records={records}
         onRefresh={handleRefresh}
       />
+      </details>
     </div>
   );
 };

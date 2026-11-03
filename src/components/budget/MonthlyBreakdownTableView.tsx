@@ -238,7 +238,7 @@ const COLUMN_DEFINITIONS: ColumnMetricDef[] = [
     color: '#2563eb',
     strokeColor: '#1d4ed8',
     gradientId: 'grad-totsav',
-    description: '50% of surplus + manual savings',
+    description: 'Recorded savings transfers only; suggestions do not move cash',
   },
   {
     key: 'remaining',
@@ -328,7 +328,7 @@ export const MonthlyBreakdownTableView: React.FC<MonthlyBreakdownTableViewProps>
   };
 
   // Aggregates across all months
-  const totalInflowAll = rows.reduce((sum, r) => sum + r.total_income, 0);
+  const totalInflowAll = (rows[0]?.previous_remaining || 0) + rows.reduce((sum, r) => sum + r.salary + r.freelance + r.returns + r.ext_income, 0);
   const totalOutflowAll = rows.reduce((sum, r) => sum + r.total_expense, 0);
   const totalDebtPaidAll = rows.reduce((sum, r) => sum + r.dept_payment, 0);
   const totalSavingsAll = rows.reduce((sum, r) => sum + r.total_savings, 0);
@@ -393,7 +393,7 @@ export const MonthlyBreakdownTableView: React.FC<MonthlyBreakdownTableViewProps>
                 </Badge>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Exact month-by-month cashflow calculation from your Complete Budget System template. Ending Debt & Remaining automatically carry over!
+                Monthly cashflow from supporting records. Account balances and available cash carry forward; savings suggestions do not move money.
               </p>
             </div>
           </div>
@@ -1022,11 +1022,11 @@ export const MonthlyBreakdownTableView: React.FC<MonthlyBreakdownTableViewProps>
           </div>
           <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-blue-500/10">
             <span className="font-bold text-slate-800 dark:text-slate-200 block mb-1">2. Overhead & Savings</span>
-            Overhead = (Total Inflow + Borrow) - (Total Outflow + Debt Paid). 50% of positive overhead is auto-stashed into savings, remaining 50% carries forward!
+            Overhead = (Total Inflow + Borrow) - (Total Outflow + Debt Paid). The 50% savings figure is a suggestion only. Available cash carries forward until a savings transfer is recorded.
           </div>
           <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-blue-500/10">
             <span className="font-bold text-slate-800 dark:text-slate-200 block mb-1">3. Ending Debt Trajectory</span>
-            Ending Debt = (Starting Debt - Debt Paid) + New Borrow + Deficit. Automatically becomes next month's Starting Debt!
+            Cash shortfalls add to closing debt. Only available cash carries forward.
           </div>
         </div>
       </div>

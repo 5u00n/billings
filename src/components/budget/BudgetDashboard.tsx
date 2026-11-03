@@ -1,3 +1,5 @@
+import { BudgetLedgerSources } from './BudgetLedgerSources';
+import { BorrowingAccountsView } from './BorrowingAccountsView';
 import { getCurrentBudgetMonth, includeCurrentBudgetMonth, useBudgetMonth } from '../../lib/budgetMonth';
 import React, { useState, useEffect } from 'react';
 import {
@@ -234,18 +236,15 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
     e.preventDefault();
     try {
       setSavingParams(true);
-      await fetch(`/api/budget/summary/${selectedMonth}`, {
+      const response = await fetch(`/api/budget/summary/${selectedMonth}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          starting_debt: Number(startingDebt),
-          previous_remaining: Number(prevRemaining),
-          dept_payment: Number(deptPayment),
-          borrow_amount: Number(borrowAmount),
           reg_savings: Number(regSavings),
           ext_savings: Number(extSavings),
         }),
       });
+      if (!response.ok) { const error = await response.json(); throw new Error(error.error || 'Could not save savings transfers'); }
       setIsDebtModalOpen(false);
       loadMonthData(selectedMonth);
     } catch (err) {
@@ -268,6 +267,7 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 w-full">
+      <BudgetLedgerSources month={selectedMonth} refreshKey={summary} />
       {/* Top Header Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xs">
         <div className="flex items-center gap-3">
@@ -310,7 +310,7 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
             size="sm"
             onClick={() => setIsDebtModalOpen(true)}
             className="gap-1.5 text-xs text-slate-700 dark:text-slate-300 h-9 rounded-xl border-slate-200 dark:border-slate-700 shadow-2xs hover:bg-slate-50 dark:hover:bg-slate-800"
-            title="Edit starting debt, debt payments, and carryover"
+            title="View calculated balances and record actual savings transfers"
           >
             <Settings2 className="w-3.5 h-3.5 text-slate-500" />
             Debt & Carryover
@@ -481,7 +481,7 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
             <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
               <span className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400 font-bold">
                 <Wallet className="w-4 h-4" />
-                4. Cash Surplus & 50/50 Split
+                4. Available Cash & Savings Suggestion
               </span>
               <span className="text-[10px] bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-semibold px-2 py-0.5 rounded-md">
                 Surplus
@@ -494,16 +494,16 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
 
           <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-1.5 text-xs text-slate-600 dark:text-slate-400">
             <div className="flex justify-between items-center">
-              <span className="text-blue-700 dark:text-blue-400 font-medium">50% Stashed to Savings</span>
-              <span className="font-bold text-blue-700 dark:text-blue-400">₹{formatINR(summary?.overhead_savings || summary?.total_savings || 0)}</span>
+              <span className="text-blue-700 dark:text-blue-400 font-medium">Suggested savings (50%)</span>
+              <span className="font-bold text-blue-700 dark:text-blue-400">₹{formatINR(summary?.overhead_savings ?? 0)}</span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-indigo-700 dark:text-indigo-400 font-medium">50% Carried to Next Month</span>
+              <span className="text-indigo-700 dark:text-indigo-400 font-medium">Available to spend / carry forward</span>
               <span className="font-bold text-indigo-700 dark:text-indigo-400">₹{formatINR(summary?.remaining || 0)}</span>
             </div>
             <div className="flex justify-between items-center text-slate-400 text-[11px] pt-1">
               <span>Target Formula</span>
-              <span>Overhead ÷ 2</span>
+              <span>Suggestion only; no money moved</span>
             </div>
           </div>
         </div>
@@ -662,6 +662,9 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
         )}
 
         {activeSubTab === 'borrow' && (
+          <>
+          <BorrowingAccountsView onRefresh={() => loadMonthData(selectedMonth)} />
+          <details className="border rounded-xl p-4"><summary>Legacy loans and lending records</summary>
           <BorrowReturnsView
             records={borrows}
             onRefresh={(entryMonth?: string) => {
@@ -673,6 +676,7 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
               }
             }}
           />
+          </details></>
         )}
 
         {activeSubTab === 'goals' && (
@@ -729,11 +733,12 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
                     type="number"
                     step="0.01"
                     required
+                    readOnly
                     value={startingDebt}
                     onChange={(e) => setStartingDebt(Number(e.target.value))}
                     className="w-full px-3 py-1.5 text-xs font-bold text-slate-900 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
-                  <span className="text-[10px] text-slate-400">Total liability at start</span>
+                  <span className="text-[10px] text-slate-400">Calculated liability at month start</span>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
@@ -743,6 +748,7 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
                     type="number"
                     step="0.01"
                     required
+                    readOnly
                     value={prevRemaining}
                     onChange={(e) => setPrevRemaining(Number(e.target.value))}
                     className="w-full px-3 py-1.5 text-xs font-bold text-emerald-700 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
@@ -759,11 +765,12 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
                   <input
                     type="number"
                     step="0.01"
+                    readOnly
                     value={deptPayment}
                     onChange={(e) => setDeptPayment(Number(e.target.value))}
                     className="w-full px-3 py-1.5 text-xs font-bold text-slate-900 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
-                  <span className="text-[10px] text-slate-400">Repayment to debt balance</span>
+                  <span className="text-[10px] text-slate-400">Calculated from repayment records</span>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
@@ -772,11 +779,12 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
                   <input
                     type="number"
                     step="0.01"
+                    readOnly
                     value={borrowAmount}
                     onChange={(e) => setBorrowAmount(Number(e.target.value))}
                     className="w-full px-3 py-1.5 text-xs font-bold text-rose-700 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
-                  <span className="text-[10px] text-slate-400">New loans taken this month</span>
+                  <span className="text-[10px] text-slate-400">Calculated cash borrowing this month</span>
                 </div>
               </div>
 
@@ -812,8 +820,8 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
               {/* Formula explanation */}
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 text-[11px] text-slate-600 space-y-1">
                 <span className="font-semibold text-slate-800">Automatic Formula Calculation:</span>
-                <p>Ending Debt = Starting Debt - Dept Payment + Borrow Amount + Deficit (if Overhead &lt; 0)</p>
-                <p>Overhead = (Total Inflow) - (Total Outflow) - (Savings Stashed)</p>
+                <p>A cash shortfall adds to closing debt. Overhead shows available cash before savings.</p>
+                <p>Available cash includes recorded receipts and cash borrowing, less cash spending, repayments and actual savings transfers.</p>
               </div>
 
               <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">

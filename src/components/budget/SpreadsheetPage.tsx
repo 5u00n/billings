@@ -1,3 +1,4 @@
+import { BudgetLedgerSources } from './BudgetLedgerSources';
 import { getCurrentBudgetMonth, includeCurrentBudgetMonth, useBudgetMonth } from '../../lib/budgetMonth';
 import React, { useState, useEffect } from 'react';
 import { MonthlyBreakdownTableView } from './MonthlyBreakdownTableView';
@@ -57,7 +58,8 @@ export const SpreadsheetPage: React.FC<SpreadsheetPageProps> = ({ profile }) => 
       setExpenses(await expRes.json());
       setIncomes(await incRes.json());
       setBorrows(await borRes.json());
-      setAllocations(await allocRes.json());
+      const allocationData = await allocRes.json();
+      setAllocations(Array.isArray(allocationData) ? allocationData : allocationData.allocations || []);
       setIsPrintModalOpen(true);
     } catch (err) {
       console.error('Failed to prepare print data:', err);
@@ -95,6 +97,7 @@ export const SpreadsheetPage: React.FC<SpreadsheetPageProps> = ({ profile }) => 
         </div>
       </div>
 
+      <BudgetLedgerSources month={selectedMonth} refreshKey={refreshKey} />
       {/* Spreadsheet Component */}
       <MonthlyBreakdownTableView
         key={refreshKey}

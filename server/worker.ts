@@ -455,6 +455,20 @@ export default {
         if (url.pathname === '/api/invoices' && method === 'POST') {
           const b = (await request.json()) as any;
           const id = b.id || createEntityId('inv');
+          let orgId = b.organization_id;
+          if (!orgId) {
+            return errorResponse('Client Organization is required', 400);
+          }
+          const orgExists = await db.prepare('SELECT id FROM organizations WHERE id = ?').bind(orgId).first();
+          if (!orgExists) {
+            const fallbackOrg = await db.prepare('SELECT id FROM organizations LIMIT 1').first();
+            if (fallbackOrg?.id) {
+              orgId = fallbackOrg.id;
+            } else {
+              return errorResponse('Selected organization does not exist. Please create an organization first.', 400);
+            }
+          }
+
           await db.prepare(`
             INSERT INTO invoices (
               id, invoice_number, doc_type, organization_id, invoice_date, terms, due_date,
@@ -465,7 +479,7 @@ export default {
             id,
             b.invoice_number,
             b.doc_type || 'BILL OF SUPPLY',
-            b.organization_id,
+            orgId,
             b.invoice_date,
             b.terms,
             b.due_date,
@@ -620,6 +634,10 @@ export default {
             return jsonResponse({ success: true });
           }
           if (method === 'DELETE') {
+            const invCountRow: any = await db.prepare('SELECT COUNT(*) as count FROM invoices WHERE organization_id = ?').bind(id).first();
+            if ((invCountRow?.count || 0) > 0) {
+              return errorResponse(`Cannot delete organization with ${invCountRow.count} existing invoices.`, 400);
+            }
             await db.prepare('DELETE FROM organizations WHERE id = ?').bind(id).run();
             return jsonResponse({ success: true });
           }

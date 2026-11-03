@@ -29,6 +29,7 @@ import { Input } from './ui/input';
 interface OrganizationDetailProps {
   organization: Organization;
   profile: UserProfile;
+  fallbackInvoices?: Invoice[];
   onBack: () => void;
   onNewInvoice: () => void;
   onEditInvoice: (invoice: Invoice) => void;
@@ -38,6 +39,7 @@ interface OrganizationDetailProps {
 export const OrganizationDetail: React.FC<OrganizationDetailProps> = ({
   organization,
   profile,
+  fallbackInvoices = [],
   onBack,
   onNewInvoice,
   onEditInvoice,
@@ -117,7 +119,11 @@ export const OrganizationDetail: React.FC<OrganizationDetailProps> = ({
     }
   };
 
-  const allInvoices: Invoice[] = orgData?.invoices || [];
+  const allInvoices: Invoice[] = (orgData?.invoices && orgData.invoices.length > 0)
+    ? orgData.invoices
+    : (fallbackInvoices && fallbackInvoices.length > 0)
+    ? fallbackInvoices
+    : (orgData?.invoices || []);
 
   const invoices = allInvoices.filter((inv) => {
     if (statusFilter === 'unpaid') return inv.balance_due > 0;
@@ -125,9 +131,17 @@ export const OrganizationDetail: React.FC<OrganizationDetailProps> = ({
     return true;
   });
 
-  const totalInvoiced = orgData?.total_invoiced || 0;
-  const totalPaid = orgData?.total_paid || 0;
-  const balanceDue = orgData?.balance_due || 0;
+  const totalInvoiced = (orgData?.total_invoiced !== undefined && orgData?.total_invoiced !== null && Number(orgData.total_invoiced) > 0)
+    ? Number(orgData.total_invoiced)
+    : allInvoices.reduce((acc, inv) => acc + (Number(inv.total) || 0), 0);
+
+  const totalPaid = (orgData?.total_paid !== undefined && orgData?.total_paid !== null && Number(orgData.total_paid) > 0)
+    ? Number(orgData.total_paid)
+    : allInvoices.reduce((acc, inv) => acc + (Number(inv.amount_paid) || 0), 0);
+
+  const balanceDue = (orgData?.balance_due !== undefined && orgData?.balance_due !== null)
+    ? Number(orgData.balance_due)
+    : allInvoices.reduce((acc, inv) => acc + (Number(inv.balance_due) || 0), 0);
 
   return (
     <div className="p-8  space-y-6">

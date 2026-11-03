@@ -123,6 +123,12 @@ export const TaxAuditView: React.FC<TaxAuditViewProps> = ({ summary, expenses, o
   const score = summary?.complianceScore ?? 100;
   const scoreColor =
     score >= 80 ? 'text-emerald-500' : score >= 60 ? 'text-amber-500' : 'text-rose-500';
+  const scoreBg =
+    score >= 80
+      ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-100 dark:border-emerald-900/40'
+      : score >= 60
+      ? 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-100 dark:border-amber-900/40'
+      : 'bg-rose-50/50 dark:bg-rose-950/20 border-rose-100 dark:border-rose-900/40';
   const totalFilteredGross = filteredExpenses.reduce((s, e) => s + (e.amount || 0), 0);
   const totalFilteredAllowed = filteredExpenses.reduce((s, e) => {
     const taxClass = e.tax_classification || 'BUSINESS_DEDUCTIBLE';

@@ -256,15 +256,17 @@ export async function executeRepair(
       return {
         success: true,
         message: 'Dry run: Ready to cleanly reset expenses, borrow records, and borrowing ledger transactions.',
-        targetTables: [
-          'expenses',
-          'borrow_records',
-          'debt_repayments',
-          'borrowing_transactions',
-          'borrowing_bills',
-          'borrowing_expense_links',
-          'borrowing_legacy_links',
-        ],
+        details: {
+          targetTables: [
+            'expenses',
+            'borrow_records',
+            'debt_repayments',
+            'borrowing_transactions',
+            'borrowing_bills',
+            'borrowing_expense_links',
+            'borrowing_legacy_links',
+          ],
+        },
       };
     }
 

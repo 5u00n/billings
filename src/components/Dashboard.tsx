@@ -461,11 +461,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {/* Monthly Budget Pace & Allowance Bar */}
       <BudgetPacingBar
-        currentMonth={selectedMonth}
+        currentMonth={currentMonth}
         totalSpent={budgetSummary?.total_expense || 0}
         regSpent={budgetSummary?.reg_expense || 0}
         extSpent={budgetSummary?.ext_expense || 0}
-        onRefresh={fetchDashboardData}
+        onRefresh={fetchDashboardBudgetData}
       />
 
       {/* Analytics & Graphs Section */}

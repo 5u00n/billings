@@ -33,6 +33,20 @@ export const Organizations: React.FC<OrganizationsProps> = ({
 }) => {
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(initialOrgId || null);
 
+  const orgStatsMap = React.useMemo(() => {
+    const map = new Map<string, { count: number; invoiced: number; paid: number; due: number }>();
+    for (const inv of invoices || []) {
+      if (!inv.organization_id) continue;
+      const cur = map.get(inv.organization_id) || { count: 0, invoiced: 0, paid: 0, due: 0 };
+      cur.count += 1;
+      cur.invoiced += Number(inv.total) || 0;
+      cur.paid += Number(inv.amount_paid) || 0;
+      cur.due += Number(inv.balance_due) || 0;
+      map.set(inv.organization_id, cur);
+    }
+    return map;
+  }, [invoices]);
+
   useEffect(() => {
     if (initialOrgId !== undefined) {
       setSelectedOrgId(initialOrgId);
@@ -134,6 +148,7 @@ export const Organizations: React.FC<OrganizationsProps> = ({
         <OrganizationDetail
           organization={org}
           profile={profile}
+          fallbackInvoices={invoices.filter((inv) => inv.organization_id === org.id)}
           onBack={() => handleSelect(null)}
           onNewInvoice={() => onNewInvoiceForOrg(org.id)}
           onEditInvoice={onEditInvoice}
@@ -143,8 +158,14 @@ export const Organizations: React.FC<OrganizationsProps> = ({
     }
   }
 
-  const totalInvoiced = organizations.reduce((acc, o) => acc + (o.total_invoiced || 0), 0);
-  const totalReceivables = organizations.reduce((acc, o) => acc + (o.balance_due || 0), 0);
+  const totalInvoiced = organizations.reduce((acc, o) => {
+    const fallbackVal = orgStatsMap.get(o.id)?.invoiced || 0;
+    return acc + (o.total_invoiced !== undefined && o.total_invoiced !== null && Number(o.total_invoiced) > 0 ? Number(o.total_invoiced) : fallbackVal);
+  }, 0);
+  const totalReceivables = organizations.reduce((acc, o) => {
+    const fallbackVal = orgStatsMap.get(o.id)?.due || 0;
+    return acc + (o.balance_due !== undefined && o.balance_due !== null ? Number(o.balance_due) : fallbackVal);
+  }, 0);
 
   const orgExportColumns: ExportColumn<Organization>[] = [
     { header: 'Organization Name', key: 'name', width: 26, align: 'left' },
@@ -312,18 +333,30 @@ export const Organizations: React.FC<OrganizationsProps> = ({
               <div className="grid grid-cols-3 gap-2 pt-1 text-center">
                 <div className="p-2 bg-slate-50 rounded-lg">
                   <div className="text-[10px] text-slate-400 font-semibold uppercase">Bills</div>
-                  <div className="text-xs font-bold text-slate-800 mt-0.5">{org.invoices_count || 0}</div>
+                  <div className="text-xs font-bold text-slate-800 mt-0.5">
+                    {org.invoices_count !== undefined && org.invoices_count !== null && org.invoices_count > 0
+                      ? org.invoices_count
+                      : (orgStatsMap.get(org.id)?.count || 0)}
+                  </div>
                 </div>
                 <div className="p-2 bg-slate-50 rounded-lg">
                   <div className="text-[10px] text-slate-400 font-semibold uppercase">Billed</div>
                   <div className="text-xs font-bold text-slate-800 mt-0.5 font-mono">
-                    ₹{formatINR(org.total_invoiced || 0)}
+                    ₹{formatINR(
+                      org.total_invoiced !== undefined && org.total_invoiced !== null && Number(org.total_invoiced) > 0
+                        ? org.total_invoiced
+                        : (orgStatsMap.get(org.id)?.invoiced || 0)
+                    )}
                   </div>
                 </div>
                 <div className="p-2 bg-blue-50/70 rounded-lg">
                   <div className="text-[10px] text-blue-600 font-semibold uppercase">Due</div>
                   <div className="text-xs font-bold text-blue-700 mt-0.5 font-mono">
-                    ₹{formatINR(org.balance_due || 0)}
+                    ₹{formatINR(
+                      org.balance_due !== undefined && org.balance_due !== null
+                        ? org.balance_due
+                        : (orgStatsMap.get(org.id)?.due || 0)
+                    )}
                   </div>
                 </div>
               </div>

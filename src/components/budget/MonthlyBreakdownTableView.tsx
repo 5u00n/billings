@@ -335,6 +335,7 @@ export const MonthlyBreakdownTableView: React.FC<MonthlyBreakdownTableViewProps>
   const totalDebtPaidAll = rows.reduce((sum, r) => sum + r.dept_payment, 0);
   const totalSavingsAll = rows.reduce((sum, r) => sum + r.total_savings, 0);
   const latestDebt = rows.length > 0 ? rows[rows.length - 1].ending_debt : 0;
+  const netCumulativeCashflow = totalInflowAll - totalOutflowAll - totalDebtPaidAll;
 
   // Chart Formatted Data
   const chartData = useMemo(() => {
@@ -479,17 +480,17 @@ export const MonthlyBreakdownTableView: React.FC<MonthlyBreakdownTableViewProps>
   const monthlyExportOptions = {
     filename: `Monthly_Breakdown_Ledger_${new Date().toISOString().slice(0, 10)}`,
     title: 'Monthly Cashflow & Budget Breakdown Ledger',
-    subtitle: `Multi-month financial summary covering ${breakdown.length} months`,
+    subtitle: `Multi-month financial summary covering ${rows.length} months`,
     sheetName: 'Spreadsheet',
     columns: monthlyExportColumns,
-    data: breakdown,
+    data: rows,
     orientation: 'landscape' as const,
     summaryMetrics: [
       { label: 'Total Inflow Logged', value: formatCurrencyForPdf(totalInflowAll) },
       { label: 'Total Outflow Logged', value: formatCurrencyForPdf(totalOutflowAll) },
-      { label: 'Total Debt Repaid', value: formatCurrencyForPdf(totalDebtRepaidAll) },
+      { label: 'Total Debt Repaid', value: formatCurrencyForPdf(totalDebtPaidAll) },
       { label: 'Net Cumulative Cashflow', value: formatCurrencyForPdf(netCumulativeCashflow) },
-      { label: 'Months Tracked', value: breakdown.length },
+      { label: 'Months Tracked', value: rows.length },
     ],
   };
 

@@ -258,7 +258,7 @@ export const TabularPdfDocument: React.FC<TabularPdfDocumentProps> = ({
               return (
                 <View
                   key={rowIdx}
-                  style={[styles.tableRow, isEven ? styles.tableRowEven : null]}
+                  style={[styles.tableRow, isEven ? styles.tableRowEven : undefined]}
                   wrap={false}
                 >
                   {columns.map((col, colIdx) => {

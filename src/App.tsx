@@ -1,30 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import { Invoice, Organization, AppSettings, CatalogItem } from './types';
-import { Sidebar, NavTab } from './components/Sidebar';
-import { Dashboard } from './components/Dashboard';
-import { InvoiceList } from './components/InvoiceList';
-import { Organizations } from './components/Organizations';
-import { Settings } from './components/Settings';
-import { ItemsCatalog } from './components/ItemsCatalog';
-import { InvoiceEditor } from './components/InvoiceEditor';
-import { Automations } from './components/Automations';
-import { BudgetDashboard } from './components/budget/BudgetDashboard';
-import { ExpensePage } from './components/budget/ExpensePage';
-import { IncomePage } from './components/budget/IncomePage';
-import { BorrowPage } from './components/budget/BorrowPage';
-import { ReturnsPage } from './components/budget/ReturnsPage';
-import { SpreadsheetPage } from './components/budget/SpreadsheetPage';
-import { AllocationsPage } from './components/budget/AllocationsPage';
-import { ComparisonPage } from './components/budget/ComparisonPage';
-import { GoalsPage } from './components/budget/GoalsPage';
-import { TaxPortal } from './components/tax/TaxPortal';
-import { ThemeProvider, useTheme } from './context/ThemeContext';
-import { RouterProvider, useRouter } from './context/RouterContext';
-import { AuthProvider, useAuth } from './context/AuthContext';
-import { LoginPage } from './components/auth/LoginPage';
-import { OfflineStatusBanner } from './components/OfflineStatusBanner';
+import { Invoice, Organization, AppSettings, CatalogItem } from '@/types';
+import { Sidebar, NavTab } from '@/components/layout/Sidebar';
+import { Dashboard } from '@/features/dashboard/pages/Dashboard';
+import { InvoiceList } from '@/features/invoices/components/InvoiceList';
+import { Organizations } from '@/features/organizations/pages/Organizations';
+import { Settings } from '@/features/admin/pages/Settings';
+import { ItemsCatalog } from '@/features/catalog/pages/ItemsCatalog';
+import { InvoiceEditor } from '@/features/invoices/components/InvoiceEditor';
+import { Automations } from '@/features/automations/pages/Automations';
+import { BudgetDashboard } from '@/features/budget/pages/BudgetDashboard';
+import { ExpensePage } from '@/features/budget/pages/ExpensePage';
+import { IncomePage } from '@/features/budget/pages/IncomePage';
+import { BorrowPage } from '@/features/budget/pages/BorrowPage';
+import { ReturnsPage } from '@/features/budget/pages/ReturnsPage';
+import { SpreadsheetPage } from '@/features/budget/pages/SpreadsheetPage';
+import { AllocationsPage } from '@/features/budget/pages/AllocationsPage';
+import { ComparisonPage } from '@/features/budget/pages/ComparisonPage';
+import { GoalsPage } from '@/features/budget/pages/GoalsPage';
+import { TaxPortal } from '@/features/tax/pages/TaxPortal';
+import { ThemeProvider, useTheme } from '@/context/ThemeContext';
+import { RouterProvider, useRouter } from '@/context/RouterContext';
+import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { LoginPage } from '@/features/auth/pages/LoginPage';
+import { OfflineStatusBanner } from '@/components/feedback/OfflineStatusBanner';
 import { Menu, Sun, Moon, Plus } from 'lucide-react';
-import { Button } from './components/ui/button';
+import { Button } from '@/components/ui/button';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { SidebarProvider, SidebarTrigger, SidebarInset } from '@/components/ui/sidebar';
 
 export const AppContent: React.FC = () => {
   const { user, loading: authLoading } = useAuth();
@@ -324,7 +326,17 @@ export const AppContent: React.FC = () => {
   }
 
   return (
-    <div className="flex h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans transition-colors duration-200">
+    <SidebarProvider
+      defaultOpen={!isSidebarCollapsed}
+      open={!isSidebarCollapsed}
+      onOpenChange={(open) => {
+        setIsSidebarCollapsed(!open);
+        try {
+          localStorage.setItem('billings_sidebar_collapsed', String(!open));
+        } catch {}
+      }}
+      className="flex h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans transition-colors duration-200"
+    >
       {/* Sidebar */}
       {!isEditorOpen && (
         <Sidebar
@@ -336,37 +348,23 @@ export const AppContent: React.FC = () => {
           onNewInvoice={() => handleNewInvoice()}
           orgCount={organizations.length}
           invoiceCount={invoices.length}
-          isMobileOpen={isMobileSidebarOpen}
-          onCloseMobile={() => setIsMobileSidebarOpen(false)}
-          isCollapsed={isSidebarCollapsed}
-          onToggleCollapse={() => {
-            const next = !isSidebarCollapsed;
-            setIsSidebarCollapsed(next);
-            try {
-              localStorage.setItem('billings_sidebar_collapsed', String(next));
-            } catch {}
-          }}
         />
       )}
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden">
+      <SidebarInset className="flex-1 flex flex-col h-full overflow-hidden min-w-0 bg-transparent">
         <OfflineStatusBanner onSync={fetchAllData} />
-        {/* Mobile Top Header (only visible on < md) */}
+        {/* Top Header Bar */}
         {!isEditorOpen && (
-          <header className="md:hidden bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 py-2.5 flex items-center justify-between no-print shrink-0 shadow-2xs">
+          <header className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xs border-b border-slate-200/80 dark:border-slate-800/80 px-4 py-2 flex items-center justify-between no-print shrink-0 shadow-2xs z-10">
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => setIsMobileSidebarOpen(true)}
-                className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                aria-label="Open navigation menu"
-              >
-                <Menu className="w-5 h-5" />
-              </button>
+              <SidebarTrigger className="h-8 w-8 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors" />
               <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white text-xs shadow-xs">
-                  H
-                </div>
+                <img
+                  src="/icons/finance.svg"
+                  alt="Billings logo"
+                  className="w-6 h-6 rounded-md shadow-xs shrink-0 object-contain"
+                />
                 <span className="font-bold text-xs text-slate-900 dark:text-white truncate">
                   {getTabTitle(currentTab)}
                 </span>
@@ -374,17 +372,19 @@ export const AppContent: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-2">
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={toggleTheme}
                 title="Toggle Theme"
-                className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                className="h-8 w-8 text-slate-500 dark:text-slate-400"
               >
                 {resolvedTheme === 'dark' ? (
                   <Sun className="w-4 h-4 text-amber-400" />
                 ) : (
                   <Moon className="w-4 h-4 text-blue-500" />
                 )}
-              </button>
+              </Button>
               <Button
                 size="sm"
                 onClick={() => handleNewInvoice()}
@@ -534,8 +534,8 @@ export const AppContent: React.FC = () => {
             </>
           )}
         </main>
-      </div>
-    </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 };
 
@@ -544,7 +544,9 @@ export const App: React.FC = () => {
     <ThemeProvider>
       <AuthProvider>
         <RouterProvider>
-          <AppContent />
+          <TooltipProvider delayDuration={200}>
+            <AppContent />
+          </TooltipProvider>
         </RouterProvider>
       </AuthProvider>
     </ThemeProvider>

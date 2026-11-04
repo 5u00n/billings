@@ -12,8 +12,30 @@ import {
   RefreshCw,
   FileText,
 } from 'lucide-react';
-import { Button } from '../ui/button';
-import { formatINR } from '../../utils/numberToWords';
+import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
+import { formatINR } from '@/utils/numberToWords';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from '@/components/ui/table';
 
 export interface FieldDefinition {
   key: string;
@@ -284,29 +306,23 @@ export const DataImportModal: React.FC<DataImportModalProps> = ({
     }
   };
 
+  if (!isOpen) return null;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-4xl rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+    <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
+      <DialogContent className="max-w-4xl p-0 overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200/60 dark:border-emerald-800 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
-              <FileSpreadsheet className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                {title}
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{description}</p>
-            </div>
+        <DialogHeader className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex flex-row items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200/60 dark:border-emerald-800 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+            <FileSpreadsheet className="w-5 h-5" />
           </div>
-          <button
-            onClick={handleClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+          <div>
+            <DialogTitle className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              {title}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500 dark:text-slate-400">{description}</DialogDescription>
+          </div>
+        </DialogHeader>
 
         {/* Error Alert */}
         {errorMessage && (
@@ -394,12 +410,15 @@ export const DataImportModal: React.FC<DataImportModalProps> = ({
                     <strong>{rawHeaders.length}</strong> columns from <strong>{file?.name}</strong>.
                   </span>
                 </div>
-                <button
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
                   onClick={handleReset}
-                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-semibold cursor-pointer"
+                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-semibold cursor-pointer h-auto p-0"
                 >
                   Change File
-                </button>
+                </Button>
               </div>
 
               {/* Column Mapping Grid */}
@@ -441,23 +460,27 @@ export const DataImportModal: React.FC<DataImportModalProps> = ({
                           )}
                         </div>
 
-                        <select
-                          value={columnMapping[field.key] || ''}
-                          onChange={(e) =>
+                        <Select
+                          value={columnMapping[field.key] || '__unmapped__'}
+                          onValueChange={(val) =>
                             setColumnMapping({
                               ...columnMapping,
-                              [field.key]: e.target.value,
+                              [field.key]: val === '__unmapped__' ? '' : val,
                             })
                           }
-                          className="w-full text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 font-medium cursor-pointer"
                         >
-                          <option value="">-- Not Mapped (Use Default) --</option>
-                          {rawHeaders.map((header) => (
-                            <option key={header} value={header}>
-                              {header} (e.g. &quot;{String(rawRows[0]?.[header] ?? '').slice(0, 20)}&quot;)
-                            </option>
-                          ))}
-                        </select>
+                          <SelectTrigger className="w-full text-xs h-8 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-800 dark:text-slate-200 font-medium">
+                            <SelectValue placeholder="-- Not Mapped (Use Default) --" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__unmapped__">-- Not Mapped (Use Default) --</SelectItem>
+                            {rawHeaders.map((header) => (
+                              <SelectItem key={header} value={header}>
+                                {header} (e.g. &quot;{String(rawRows[0]?.[header] ?? '').slice(0, 20)}&quot;)
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                     );
                   })}
@@ -511,26 +534,26 @@ export const DataImportModal: React.FC<DataImportModalProps> = ({
 
               {/* Live Preview Table */}
               <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden max-h-64 overflow-y-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead className="bg-slate-100 dark:bg-slate-800 sticky top-0 font-bold text-slate-700 dark:text-slate-300">
-                    <tr>
-                      <th className="p-2.5 border-b border-slate-200 dark:border-slate-700 w-12 text-center">#</th>
-                      <th className="p-2.5 border-b border-slate-200 dark:border-slate-700 w-20">Status</th>
+                <Table className="w-full text-left text-xs border-collapse">
+                  <TableHeader className="bg-slate-100 dark:bg-slate-800 sticky top-0 font-bold text-slate-700 dark:text-slate-300">
+                    <TableRow>
+                      <TableHead className="p-2.5 border-b border-slate-200 dark:border-slate-700 w-12 text-center">#</TableHead>
+                      <TableHead className="p-2.5 border-b border-slate-200 dark:border-slate-700 w-20">Status</TableHead>
                       {targetFields.map((field) => (
-                        <th key={field.key} className="p-2.5 border-b border-slate-200 dark:border-slate-700">
+                        <TableHead key={field.key} className="p-2.5 border-b border-slate-200 dark:border-slate-700">
                           {field.label}
-                        </th>
+                        </TableHead>
                       ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
                     {mappedRows.slice(0, 50).map((row) => (
-                      <tr
+                      <TableRow
                         key={row._index}
                         className={row._isValid ? 'hover:bg-slate-50 dark:hover:bg-slate-800/50' : 'bg-red-50/40 dark:bg-red-950/20'}
                       >
-                        <td className="p-2.5 text-center text-slate-400 font-mono text-[11px]">{row._index}</td>
-                        <td className="p-2.5">
+                        <TableCell className="p-2.5 text-center text-slate-400 font-mono text-[11px]">{row._index}</TableCell>
+                        <TableCell className="p-2.5">
                           {row._isValid ? (
                             <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">
                               <CheckCircle2 className="w-3.5 h-3.5" /> Valid
@@ -543,18 +566,18 @@ export const DataImportModal: React.FC<DataImportModalProps> = ({
                               <AlertTriangle className="w-3.5 h-3.5" /> Invalid
                             </span>
                           )}
-                        </td>
+                        </TableCell>
                         {targetFields.map((field) => (
-                          <td key={field.key} className="p-2.5 font-medium truncate max-w-[180px]">
+                          <TableCell key={field.key} className="p-2.5 font-medium truncate max-w-[180px]">
                             {field.type === 'number'
                               ? `₹${formatINR(Number(row[field.key]) || 0)}`
                               : String(row[field.key] || '-')}
-                          </td>
+                          </TableCell>
                         ))}
-                      </tr>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
             </div>
           )}
@@ -617,7 +640,7 @@ export const DataImportModal: React.FC<DataImportModalProps> = ({
             )}
           </div>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 };

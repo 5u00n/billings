@@ -1114,6 +1114,14 @@ export default {
             const month = b.month || date.substring(0, 7);
             const amount = Number(b.amount) || 0;
 
+            let linkedBorrowId: string | null = (b.linked_borrow_id && typeof b.linked_borrow_id === 'string' && b.linked_borrow_id.trim()) ? b.linked_borrow_id.trim() : null;
+            if (linkedBorrowId) {
+              const borrowExists = await db.prepare('SELECT id FROM borrow_records WHERE id = ?').bind(linkedBorrowId).first();
+              if (!borrowExists) {
+                linkedBorrowId = null;
+              }
+            }
+
             await db.prepare(`
               INSERT INTO expenses (id, date, month, category, tag, description, amount, payment_method, notes, tax_classification, business_percentage, gst_rate, gst_itc_eligible, has_invoice_voucher, voucher_ref, linked_borrow_id)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1133,7 +1141,7 @@ export default {
               b.gst_itc_eligible ? 1 : 0,
               b.has_invoice_voucher ? 1 : 0,
               b.voucher_ref || '',
-              b.linked_borrow_id || null
+              linkedBorrowId
             ).run();
 
             // Auto-create borrow record if Credit Card, Slice Borrow, or Amazon Borrow
@@ -1194,6 +1202,14 @@ export default {
             const month = b.month || date.substring(0, 7);
             const id = b.id || crypto.randomUUID();
 
+            let linkedBorrowId: string | null = (b.linked_borrow_id && typeof b.linked_borrow_id === 'string' && b.linked_borrow_id.trim()) ? b.linked_borrow_id.trim() : null;
+            if (linkedBorrowId) {
+              const borrowExists = await db.prepare('SELECT id FROM borrow_records WHERE id = ?').bind(linkedBorrowId).first();
+              if (!borrowExists) {
+                linkedBorrowId = null;
+              }
+            }
+
             await db.prepare(`
               INSERT INTO expenses (id, date, month, category, tag, description, amount, payment_method, notes, tax_classification, business_percentage, gst_rate, gst_itc_eligible, has_invoice_voucher, voucher_ref, linked_borrow_id)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1213,7 +1229,7 @@ export default {
               b.gst_itc_eligible ? 1 : 0,
               b.has_invoice_voucher !== undefined ? (b.has_invoice_voucher ? 1 : 0) : 1,
               b.voucher_ref || '',
-              b.linked_borrow_id || null
+              linkedBorrowId
             ).run();
 
             if (['Credit Card', 'Slice Borrow', 'Amazon Borrow'].includes(b.payment_method)) {
@@ -1244,12 +1260,29 @@ export default {
               ? b.date.trim()
               : new Date().toISOString().split('T')[0];
             const month = b.month || date.substring(0, 7);
+
+            let linkedBorrowId: string | null = null;
+            if (b.linked_borrow_id !== undefined) {
+              if (b.linked_borrow_id && typeof b.linked_borrow_id === 'string' && b.linked_borrow_id.trim()) {
+                const borrowExists = await db.prepare('SELECT id FROM borrow_records WHERE id = ?').bind(b.linked_borrow_id.trim()).first();
+                linkedBorrowId = borrowExists ? b.linked_borrow_id.trim() : null;
+              } else {
+                linkedBorrowId = null;
+              }
+            } else {
+              const existingExp: any = await db.prepare('SELECT linked_borrow_id FROM expenses WHERE id = ?').bind(id).first();
+              if (existingExp?.linked_borrow_id) {
+                const borrowExists = await db.prepare('SELECT id FROM borrow_records WHERE id = ?').bind(existingExp.linked_borrow_id).first();
+                linkedBorrowId = borrowExists ? existingExp.linked_borrow_id : null;
+              }
+            }
+
             await db.prepare(`
               UPDATE expenses SET
                 date = ?, month = ?, category = ?, tag = ?, description = ?, amount = ?,
                 payment_method = ?, notes = ?, tax_classification = ?, business_percentage = ?,
                 gst_rate = ?, gst_itc_eligible = ?, has_invoice_voucher = ?, voucher_ref = ?,
-                linked_borrow_id = COALESCE(?, linked_borrow_id)
+                linked_borrow_id = ?
               WHERE id = ?
             `).bind(
               date,
@@ -1266,7 +1299,7 @@ export default {
               b.gst_itc_eligible ? 1 : 0,
               b.has_invoice_voucher ? 1 : 0,
               b.voucher_ref || '',
-              b.linked_borrow_id || null,
+              linkedBorrowId,
               id
             ).run();
 
@@ -1310,10 +1343,17 @@ export default {
               ? b.date.trim()
               : new Date().toISOString().split('T')[0];
             const month = b.month || date.substring(0, 7);
+
+            let invoiceId: string | null = (b.invoice_id && typeof b.invoice_id === 'string' && b.invoice_id.trim()) ? b.invoice_id.trim() : null;
+            if (invoiceId) {
+              const invExists = await db.prepare('SELECT id FROM invoices WHERE id = ?').bind(invoiceId).first();
+              if (!invExists) invoiceId = null;
+            }
+
             await db.prepare(`
               INSERT INTO income_entries (id, date, month, category, source, amount, invoice_id, notes)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `).bind(id, date, month, b.category || 'fl', b.source || 'Client', b.amount || 0, b.invoice_id || null, b.notes || '').run();
+            `).bind(id, date, month, b.category || 'fl', b.source || 'Client', b.amount || 0, invoiceId, b.notes || '').run();
             return jsonResponse({ id, month, success: true }, 201);
           }
         }
@@ -1331,10 +1371,16 @@ export default {
             const month = b.month || date.substring(0, 7);
             const id = b.id || crypto.randomUUID();
 
+            let invoiceId: string | null = (b.invoice_id && typeof b.invoice_id === 'string' && b.invoice_id.trim()) ? b.invoice_id.trim() : null;
+            if (invoiceId) {
+              const invExists = await db.prepare('SELECT id FROM invoices WHERE id = ?').bind(invoiceId).first();
+              if (!invExists) invoiceId = null;
+            }
+
             await db.prepare(`
               INSERT INTO income_entries (id, date, month, category, source, amount, invoice_id, notes)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `).bind(id, date, month, b.category || 'fl', String(b.source).trim(), amount, b.invoice_id || null, b.notes || '').run();
+            `).bind(id, date, month, b.category || 'fl', String(b.source).trim(), amount, invoiceId, b.notes || '').run();
             count++;
           }
           return jsonResponse({ success: true, count });
@@ -1348,10 +1394,27 @@ export default {
               ? b.date.trim()
               : new Date().toISOString().split('T')[0];
             const month = b.month || date.substring(0, 7);
+
+            let invoiceId: string | null = null;
+            if (b.invoice_id !== undefined) {
+              if (b.invoice_id && typeof b.invoice_id === 'string' && b.invoice_id.trim()) {
+                const invExists = await db.prepare('SELECT id FROM invoices WHERE id = ?').bind(b.invoice_id.trim()).first();
+                invoiceId = invExists ? b.invoice_id.trim() : null;
+              } else {
+                invoiceId = null;
+              }
+            } else {
+              const existingInc: any = await db.prepare('SELECT invoice_id FROM income_entries WHERE id = ?').bind(id).first();
+              if (existingInc?.invoice_id) {
+                const invExists = await db.prepare('SELECT id FROM invoices WHERE id = ?').bind(existingInc.invoice_id).first();
+                invoiceId = invExists ? existingInc.invoice_id : null;
+              }
+            }
+
             await db.prepare(`
               UPDATE income_entries SET date = ?, month = ?, category = ?, source = ?, amount = ?, invoice_id = ?, notes = ?
               WHERE id = ?
-            `).bind(date, month, b.category, b.source, b.amount, b.invoice_id || null, b.notes || '', id).run();
+            `).bind(date, month, b.category, b.source, b.amount, invoiceId, b.notes || '', id).run();
             return jsonResponse({ success: true });
           }
           if (method === 'DELETE') {
@@ -1526,6 +1589,13 @@ export default {
           if (method === 'POST') {
             const b = (await request.json()) as any;
             const id = b.id || createEntityId('gol');
+
+            let linkedExpenseId: string | null = (b.linked_expense_id && typeof b.linked_expense_id === 'string' && b.linked_expense_id.trim()) ? b.linked_expense_id.trim() : null;
+            if (linkedExpenseId) {
+              const expExists = await db.prepare('SELECT id FROM expenses WHERE id = ?').bind(linkedExpenseId).first();
+              if (!expExists) linkedExpenseId = null;
+            }
+
             await db.prepare(`
               INSERT INTO financial_goals (id, name, target_amount, savings_percent, saved_amount, target_date, status, spent_amount, completed_date, linked_expense_id, notes)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1539,7 +1609,7 @@ export default {
               b.status || 'IN_PROGRESS',
               b.spent_amount || 0,
               b.completed_date || null,
-              b.linked_expense_id || null,
+              linkedExpenseId,
               b.notes || ''
             ).run();
             return jsonResponse({ id, success: true }, 201);
@@ -1640,6 +1710,23 @@ export default {
           const id = subPath;
           if (method === 'PUT') {
             const b = (await request.json()) as any;
+
+            let linkedExpenseId: string | null = null;
+            if (b.linked_expense_id !== undefined) {
+              if (b.linked_expense_id && typeof b.linked_expense_id === 'string' && b.linked_expense_id.trim()) {
+                const expExists = await db.prepare('SELECT id FROM expenses WHERE id = ?').bind(b.linked_expense_id.trim()).first();
+                linkedExpenseId = expExists ? b.linked_expense_id.trim() : null;
+              } else {
+                linkedExpenseId = null;
+              }
+            } else {
+              const existingGoal: any = await db.prepare('SELECT linked_expense_id FROM financial_goals WHERE id = ?').bind(id).first();
+              if (existingGoal?.linked_expense_id) {
+                const expExists = await db.prepare('SELECT id FROM expenses WHERE id = ?').bind(existingGoal.linked_expense_id).first();
+                linkedExpenseId = expExists ? existingGoal.linked_expense_id : null;
+              }
+            }
+
             await db.prepare(`
               UPDATE financial_goals SET
                 name = ?,
@@ -1662,7 +1749,7 @@ export default {
               b.status || 'IN_PROGRESS',
               b.spent_amount || 0,
               b.completed_date || null,
-              b.linked_expense_id || null,
+              linkedExpenseId,
               b.notes || '',
               id
             ).run();
@@ -1804,13 +1891,13 @@ export default {
 
           await db.batch([
             db.prepare(`
-              INSERT INTO current_account_withdrawals (id, date, month, amount, notes, income_entry_id)
-              VALUES (?, ?, ?, ?, ?, ?)
-            `).bind(withdrawalId, withdrawDate, withdrawMonth, numAmount, withdrawalNotes, incomeId),
-            db.prepare(`
               INSERT INTO income_entries (id, date, month, category, source, amount, notes)
               VALUES (?, ?, ?, 'fl', ?, ?, ?)
             `).bind(incomeId, withdrawDate, withdrawMonth, incomeSource, numAmount, withdrawalNotes),
+            db.prepare(`
+              INSERT INTO current_account_withdrawals (id, date, month, amount, notes, income_entry_id)
+              VALUES (?, ?, ?, ?, ?, ?)
+            `).bind(withdrawalId, withdrawDate, withdrawMonth, numAmount, withdrawalNotes, incomeId),
           ]);
 
           return jsonResponse({
@@ -2439,8 +2526,29 @@ export default {
           }
 
           const stmts: D1PreparedStatement[] = [];
+
+          // 1. Deletions in child-to-parent order to respect foreign key constraints
           if (Array.isArray(data.invoices)) {
+            stmts.push(db.prepare('DELETE FROM invoice_items'));
             stmts.push(db.prepare('DELETE FROM invoices'));
+          }
+          if (Array.isArray(data.organizations)) {
+            stmts.push(db.prepare('DELETE FROM organizations'));
+          }
+          if (Array.isArray(data.expenses)) {
+            stmts.push(db.prepare('DELETE FROM expenses'));
+          }
+
+          // 2. Insertions in parent-to-child order
+          if (Array.isArray(data.organizations)) {
+            for (const o of data.organizations) {
+              stmts.push(
+                db.prepare('INSERT INTO organizations (id, name, address, city, state, pincode, country, phone, email, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                  .bind(o.id, o.name, o.address, o.city, o.state, o.pincode, o.country, o.phone, o.email, o.notes, o.created_at)
+              );
+            }
+          }
+          if (Array.isArray(data.invoices)) {
             for (const i of data.invoices) {
               stmts.push(
                 db.prepare(`
@@ -2450,17 +2558,7 @@ export default {
               );
             }
           }
-          if (Array.isArray(data.organizations)) {
-            stmts.push(db.prepare('DELETE FROM organizations'));
-            for (const o of data.organizations) {
-              stmts.push(
-                db.prepare('INSERT INTO organizations (id, name, address, city, state, pincode, country, phone, email, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-                  .bind(o.id, o.name, o.address, o.city, o.state, o.pincode, o.country, o.phone, o.email, o.notes, o.created_at)
-              );
-            }
-          }
           if (Array.isArray(data.expenses)) {
-            stmts.push(db.prepare('DELETE FROM expenses'));
             for (const e of data.expenses) {
               stmts.push(
                 db.prepare('INSERT INTO expenses (id, date, month, category, tag, description, amount, payment_method, notes, tax_classification, business_percentage, gst_rate, gst_itc_eligible, has_invoice_voucher, voucher_ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')

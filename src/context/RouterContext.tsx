@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { NavTab } from '../components/Sidebar';
+import { NavTab } from '@/components/layout/Sidebar';
 
 export interface RouteState {
   path: string;

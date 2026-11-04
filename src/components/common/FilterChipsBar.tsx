@@ -1,5 +1,7 @@
 import React from 'react';
 import { X, RotateCcw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 
 export interface ActiveFilterChip {
   key: string;
@@ -48,26 +50,30 @@ export const FilterChipsBar: React.FC<FilterChipsBarProps> = ({
           >
             <span className="font-semibold text-blue-800 dark:text-blue-200">{chip.label}:</span>
             <span className="truncate max-w-[140px]">{chip.valueDisplay}</span>
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon"
               onClick={chip.onRemove}
-              className="p-0.5 rounded-full hover:bg-blue-200/70 dark:hover:bg-blue-900/70 text-blue-600 dark:text-blue-300 cursor-pointer"
+              className="h-4 w-4 p-0 rounded-full hover:bg-blue-200/70 dark:hover:bg-blue-900/70 text-blue-600 dark:text-blue-300 cursor-pointer"
               title={`Remove ${chip.label} filter`}
             >
               <X className="w-3 h-3" />
-            </button>
+            </Button>
           </span>
         ))}
 
         {hasActiveFilters && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={onClearAll}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-transparent hover:border-rose-200 transition-colors cursor-pointer"
+            className="h-6 px-2.5 rounded-full text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-transparent hover:border-rose-200 transition-colors cursor-pointer"
           >
-            <RotateCcw className="w-3 h-3" />
+            <RotateCcw className="w-3 h-3 mr-1" />
             Reset all
-          </button>
+          </Button>
         )}
       </div>
 

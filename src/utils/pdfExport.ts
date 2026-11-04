@@ -1,7 +1,7 @@
 import { pdf } from '@react-pdf/renderer';
 import React from 'react';
 import { Invoice, UserProfile } from '../types';
-import { InvoicePdfDocument } from '../components/InvoicePdfDocument';
+import { InvoicePdfDocument } from '@/features/invoices/components/InvoicePdfDocument';
 import { generateUpiQrDataUrl } from './upiQr';
 
 export function printInvoice(): void {

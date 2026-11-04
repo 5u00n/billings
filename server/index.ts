@@ -2125,17 +2125,17 @@ app.post('/api/budget/current-account/withdraw', (req: Request, res: Response) =
     const withdrawalNotes = notes?.trim() || 'Owner draw from Current Account to freelance income';
 
     const tx = db.transaction(() => {
-      // Record in current_account_withdrawals
-      db.prepare(`
-        INSERT INTO current_account_withdrawals (id, date, month, amount, notes, income_entry_id)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(withdrawalId, withdrawDate, withdrawMonth, numAmount, withdrawalNotes, incomeId);
-
-      // Record in income_entries as freelance income ('fl')
+      // Record in income_entries as freelance income ('fl') first (parent table)
       db.prepare(`
         INSERT INTO income_entries (id, date, month, category, source, amount, notes)
         VALUES (?, ?, ?, 'fl', ?, ?, ?)
       `).run(incomeId, withdrawDate, withdrawMonth, incomeSource, numAmount, withdrawalNotes);
+
+      // Record in current_account_withdrawals (child table referencing income_entry_id)
+      db.prepare(`
+        INSERT INTO current_account_withdrawals (id, date, month, amount, notes, income_entry_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(withdrawalId, withdrawDate, withdrawMonth, numAmount, withdrawalNotes, incomeId);
     });
 
     tx();
@@ -2233,6 +2233,12 @@ app.post('/api/budget/expenses', (req: Request, res: Response) => {
     );
     const busPct = body.business_percentage !== undefined ? Number(body.business_percentage) : (taxClass === 'MIXED_APPORTIONED' ? 70 : 100);
 
+    let linkedBorrowId: string | null = (body.linked_borrow_id && typeof body.linked_borrow_id === 'string' && body.linked_borrow_id.trim()) ? body.linked_borrow_id.trim() : null;
+    if (linkedBorrowId) {
+      const borrowExists = db.prepare('SELECT id FROM borrow_records WHERE id = ?').get(linkedBorrowId);
+      if (!borrowExists) linkedBorrowId = null;
+    }
+
     db.prepare(`
       INSERT INTO expenses (id, date, month, category, tag, description, amount, payment_method, notes, tax_classification, business_percentage, gst_rate, gst_itc_eligible, has_invoice_voucher, voucher_ref, linked_borrow_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -2252,7 +2258,7 @@ app.post('/api/budget/expenses', (req: Request, res: Response) => {
       body.gst_itc_eligible ? 1 : 0,
       body.has_invoice_voucher !== undefined ? (body.has_invoice_voucher ? 1 : 0) : 1,
       body.voucher_ref || '',
-      body.linked_borrow_id || null
+      linkedBorrowId
     );
 
     // If payment method is Credit Card, Slice Borrow, or Amazon Borrow and create_borrow is not explicitly false, auto-create a borrow record

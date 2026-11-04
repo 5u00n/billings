@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Download, FileSpreadsheet, FileText, Loader2, ChevronDown } from 'lucide-react';
-import { Button } from '../ui/button';
-import { ExportOptions, exportToExcel, exportToPdf } from '../../utils/dataExport';
+import { Button } from '@/components/ui/button';
+import { ExportOptions, exportToExcel, exportToPdf } from '@/utils/dataExport';
 
 export interface ExportActionsProps<T = any> {
   exportOptions: ExportOptions<T>;
@@ -97,35 +97,37 @@ export const ExportActions = <T,>({
           </div>
 
           <div className="py-1">
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={handleExportExcel}
               disabled={exportingType !== null}
-              className="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 hover:text-emerald-700 dark:hover:text-emerald-400 flex items-center gap-2.5 transition-colors group"
+              className="w-full h-auto text-left justify-start px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 hover:text-emerald-700 dark:hover:text-emerald-400 flex items-center gap-2.5 transition-colors group rounded-none font-normal"
             >
               <div className="p-1 rounded bg-emerald-100 dark:bg-emerald-900/60 text-emerald-600 dark:text-emerald-400 group-hover:scale-105 transition-transform">
                 <FileSpreadsheet className="w-3.5 h-3.5" />
               </div>
-              <div className="flex flex-col">
+              <div className="flex flex-col text-left">
                 <span className="font-medium">Excel Spreadsheet</span>
                 <span className="text-[10px] text-slate-400">Microsoft Excel (.xlsx)</span>
               </div>
-            </button>
+            </Button>
 
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={handleExportPdf}
               disabled={exportingType !== null}
-              className="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-700 dark:hover:text-rose-400 flex items-center gap-2.5 transition-colors group"
+              className="w-full h-auto text-left justify-start px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-700 dark:hover:text-rose-400 flex items-center gap-2.5 transition-colors group rounded-none font-normal"
             >
               <div className="p-1 rounded bg-rose-100 dark:bg-rose-900/60 text-rose-600 dark:text-rose-400 group-hover:scale-105 transition-transform">
                 <FileText className="w-3.5 h-3.5" />
               </div>
-              <div className="flex flex-col">
+              <div className="flex flex-col text-left">
                 <span className="font-medium">Vector PDF Document</span>
                 <span className="text-[10px] text-slate-400">Printable Letterhead (.pdf)</span>
               </div>
-            </button>
+            </Button>
           </div>
         </div>
       )}

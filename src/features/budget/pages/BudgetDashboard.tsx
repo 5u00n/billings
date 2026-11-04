@@ -544,7 +544,7 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
           )}
 
           {isStage2Active && (
-            <>
+            <div className="flex flex-wrap gap-4">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider px-2">Stage 2 Views:</span>
               <Button
                 variant={activeSubTab === 'expenses' ? 'default' : 'outline'}
@@ -564,7 +564,7 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
                 <Layers className="w-3.5 h-3.5" />
                 100% Allocation Envelopes
               </Button>
-            </>
+            </div>
           )}
 
           {isStage3Active && (

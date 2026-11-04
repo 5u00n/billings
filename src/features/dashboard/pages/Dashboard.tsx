@@ -35,7 +35,6 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { CardSpotlight } from '@/components/aceternity/card-spotlight';
 import {
   AreaChart,
   Area,
@@ -62,6 +61,7 @@ import {
 import { useTheme } from '@/context/ThemeContext';
 import { NavTab } from '@/components/layout/Sidebar';
 import { BudgetPacingBar } from '@/features/budget/components/BudgetPacingBar';
+import { KpiMetricsCards } from '../components/kpi-metrics-cards';
 
 interface DashboardProps {
   invoices: Invoice[];
@@ -287,8 +287,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
       {/* Overview Header Banner */}
       <div className="rounded-2xl bg-white dark:bg-slate-900 p-6 sm:p-7 border border-slate-200/90 dark:border-slate-800 shadow-2xs">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div>
+        <div className="flex flex-wrap justify-between gap-4">
+          <div className="">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                 Overview & Summary
@@ -307,12 +307,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <div className="flex flex-wrap gap-2 ">
             <Button
               onClick={() => onNavigate?.('tax')}
               variant="outline"
               size="sm"
-              className="gap-1.5 text-xs text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 h-9"
+              className="flex-1 gap-1.5 text-xs text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 h-9"
             >
               <Landmark className="w-3.5 h-3.5 text-slate-500" />
               <span>Tax & Current A/C</span>
@@ -321,7 +321,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               onClick={() => onNavigate?.('expenses')}
               variant="outline"
               size="sm"
-              className="gap-1.5 text-xs text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 h-9"
+              className="flex-1 gap-1.5 text-xs text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 h-9"
             >
               <Receipt className="w-3.5 h-3.5 text-slate-500" />
               <span>Log Expense</span>
@@ -329,7 +329,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <Button
               onClick={onNewInvoice}
               size="sm"
-              className="gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs h-9 px-4 shadow-xs"
+              className="flex-1 gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs h-9 px-4 shadow-xs"
             >
               <Plus className="w-4 h-4" />
               <span>Create Bill</span>
@@ -338,133 +338,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* Unified KPI Metrics: Business Billing + Personal Finance (Aceternity CardSpotlight) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        {/* Client Receivables (Business) */}
-        <CardSpotlight
-          onClick={() => onNavigate?.('invoices')}
-          color="rgba(59, 130, 246, 0.15)"
-          className="p-5 hover:border-blue-300 dark:hover:border-blue-700 transition-all shadow-2xs cursor-pointer group flex flex-col justify-between"
-        >
-          <div className="flex flex-row items-center justify-between pb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Client Receivables
-            </span>
-            <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center">
-              <Clock className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <div>
-            <div className="text-xl font-bold font-mono text-blue-600 dark:text-blue-400">
-              ₹{formatINR(totalReceivables)}
-            </div>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1 font-medium">
-              <AlertCircle className="w-3 h-3 text-blue-500" />
-              <span>{pendingInvoices.length} outstanding bills</span>
-            </p>
-          </div>
-        </CardSpotlight>
-
-        {/* Total Inflow (Personal) */}
-        <CardSpotlight
-          onClick={() => onNavigate?.('income')}
-          color="rgba(16, 185, 129, 0.15)"
-          className="p-5 hover:border-emerald-300 dark:hover:border-emerald-700 transition-all shadow-2xs cursor-pointer group flex flex-col justify-between"
-        >
-          <div className="flex flex-row items-center justify-between pb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Month Inflow
-            </span>
-            <div className="w-7 h-7 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-              <ArrowUpRight className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <div>
-            <div className="text-xl font-bold font-mono text-emerald-600 dark:text-emerald-400">
-              ₹{formatINR((budgetSummary?.total_income || 0) + (budgetSummary?.previous_remaining || 0))}
-            </div>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
-              Income + carryover
-            </p>
-          </div>
-        </CardSpotlight>
-
-        {/* Total Outflow (Personal) */}
-        <CardSpotlight
-          onClick={() => onNavigate?.('expenses')}
-          color="rgba(244, 63, 94, 0.15)"
-          className="p-5 hover:border-rose-300 dark:hover:border-rose-700 transition-all shadow-2xs cursor-pointer group flex flex-col justify-between"
-        >
-          <div className="flex flex-row items-center justify-between pb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Month Expenses
-            </span>
-            <div className="w-7 h-7 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center">
-              <ArrowDownRight className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <div>
-            <div className="text-xl font-bold font-mono text-rose-600 dark:text-rose-400">
-              ₹{formatINR(budgetSummary?.total_expense || 0)}
-            </div>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
-              Fixed & extra spending
-            </p>
-          </div>
-        </CardSpotlight>
-
-        {/* Net Safe-to-Spend / Overhead */}
-        <CardSpotlight
-          onClick={() => onNavigate?.('budget')}
-          color="rgba(99, 102, 241, 0.15)"
-          className="p-5 hover:border-indigo-300 dark:hover:border-indigo-700 transition-all shadow-2xs cursor-pointer group flex flex-col justify-between"
-        >
-          <div className="flex flex-row items-center justify-between pb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Overhead Surplus
-            </span>
-            <div className="w-7 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
-              <Wallet className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <div>
-            <div
-              className={`text-xl font-bold font-mono ${
-                (budgetSummary?.overhead || 0) < 0 ? 'text-amber-600' : 'text-slate-900 dark:text-white'
-              }`}
-            >
-              ₹{formatINR(budgetSummary?.remaining || 0)}
-            </div>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
-              Carried to next month
-            </p>
-          </div>
-        </CardSpotlight>
-
-        {/* Ending Debt / Liabilities */}
-        <CardSpotlight
-          onClick={() => onNavigate?.('borrow')}
-          color="rgba(239, 68, 68, 0.15)"
-          className="p-5 hover:border-red-300 dark:hover:border-red-700 transition-all shadow-2xs cursor-pointer group flex flex-col justify-between"
-        >
-          <div className="flex flex-row items-center justify-between pb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Total Liabilities
-            </span>
-            <div className="w-7 h-7 rounded-lg bg-red-50 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center">
-              <Landmark className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <div>
-            <div className="text-xl font-bold font-mono text-red-600 dark:text-red-400">
-              ₹{formatINR(budgetSummary?.ending_debt || 0)}
-            </div>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
-              Active loan balance
-            </p>
-          </div>
-        </CardSpotlight>
-      </div>
+      {/* Unified KPI Metrics: Business Billing + Personal Finance */}
+      <KpiMetricsCards
+        totalReceivables={totalReceivables}
+        pendingInvoicesCount={pendingInvoices.length}
+        budgetSummary={budgetSummary}
+        onNavigate={onNavigate}
+      />
 
       {/* Monthly Budget Pace & Allowance Bar */}
       <BudgetPacingBar
@@ -673,11 +553,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     variant="ghost"
                     size="sm"
                     onClick={() => setExpenseChartMode('tag')}
-                    className={`h-6 px-2 py-0.5 rounded-md transition-all text-[10px] ${
-                      expenseChartMode === 'tag'
+                    className={`h-6 px-2 py-0.5 rounded-md transition-all text-[10px] ${expenseChartMode === 'tag'
                         ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-2xs font-bold'
                         : 'text-slate-500 dark:text-slate-400'
-                    }`}
+                      }`}
                   >
                     By Tag
                   </Button>
@@ -686,11 +565,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     variant="ghost"
                     size="sm"
                     onClick={() => setExpenseChartMode('category')}
-                    className={`h-6 px-2 py-0.5 rounded-md transition-all text-[10px] ${
-                      expenseChartMode === 'category'
+                    className={`h-6 px-2 py-0.5 rounded-md transition-all text-[10px] ${expenseChartMode === 'category'
                         ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-2xs font-bold'
                         : 'text-slate-500 dark:text-slate-400'
-                    }`}
+                      }`}
                   >
                     Reg vs Extra
                   </Button>
@@ -1116,9 +994,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                     <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
                       <div
-                        className={`h-full rounded-full transition-all duration-300 ${
-                          pct > 80 ? 'bg-amber-500' : 'bg-blue-600'
-                        }`}
+                        className={`h-full rounded-full transition-all duration-300 ${pct > 80 ? 'bg-amber-500' : 'bg-blue-600'
+                          }`}
                         style={{ width: `${pct}%` }}
                       />
                     </div>
@@ -1159,11 +1036,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     >
                       <div className="flex items-center gap-2 overflow-hidden">
                         <span
-                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                            exp.category === 'reg'
+                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${exp.category === 'reg'
                               ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-400'
                               : 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400'
-                          }`}
+                            }`}
                         >
                           {exp.category === 'reg' ? 'Reg' : 'Ext'}
                         </span>

@@ -16,6 +16,7 @@ import {
   X,
   Layers,
   ChevronRight,
+  Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -238,29 +239,34 @@ export const Automations: React.FC<AutomationsProps> = ({
   return (
     <div className="space-y-6">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-200/80">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-200/80 dark:border-slate-800">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Billing Automations</h1>
-            <Badge variant="outline" className="text-xs bg-purple-50 text-purple-700 border-purple-200 font-semibold">
+            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+              Billing Automations
+            </h1>
+            <Badge
+              variant="outline"
+              className="text-xs bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-900/60 font-semibold"
+            >
               Auto-Runner Active
             </Badge>
           </div>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             Auto-generate recurring monthly retainers and scheduled project milestone bills on their due dates.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             size="sm"
             onClick={handleRunDue}
             disabled={runningDue}
-            className="gap-1.5 text-xs font-semibold"
+            className="gap-1.5 text-xs font-semibold border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/80 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 shadow-2xs"
           >
-            <Play className={`w-3.5 h-3.5 ${runningDue ? 'animate-spin text-blue-600' : 'text-emerald-600'}`} />
-            {runningDue ? 'Checking...' : 'Check & Run Due Now'}
+            <Play className={`w-3.5 h-3.5 ${runningDue ? 'animate-spin text-blue-600 dark:text-blue-400' : 'text-emerald-600 dark:text-emerald-400'}`} />
+            <span>{runningDue ? 'Checking...' : 'Check & Run Due Now'}</span>
           </Button>
 
           <Button
@@ -269,19 +275,19 @@ export const Automations: React.FC<AutomationsProps> = ({
               resetForm();
               setIsModalOpen(true);
             }}
-            className="gap-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white shadow-2xs"
+            className="gap-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white shadow-xs cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
-            New Automation
+            <span>New Automation</span>
           </Button>
         </div>
       </div>
 
       {/* Alert toast for run result */}
       {runResult && (
-        <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs text-emerald-800 animate-in fade-in">
+        <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/50 rounded-xl flex items-center justify-between text-xs text-emerald-800 dark:text-emerald-300 animate-in fade-in">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
             <span>
               {runResult.count > 0
                 ? `Successfully generated ${runResult.count} bill(s): ${runResult.invoices.join(', ')}`
@@ -292,7 +298,7 @@ export const Automations: React.FC<AutomationsProps> = ({
             variant="ghost"
             size="icon"
             onClick={() => setRunResult(null)}
-            className="h-6 w-6 text-emerald-500 hover:text-emerald-800 p-0"
+            className="h-6 w-6 text-emerald-500 hover:text-emerald-800 dark:hover:text-emerald-200 p-0"
           >
             <X className="w-4 h-4" />
           </Button>
@@ -300,77 +306,104 @@ export const Automations: React.FC<AutomationsProps> = ({
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="shadow-2xs">
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 sm:gap-4">
+        {/* Active Automations */}
+        <Card className="border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-xs hover:border-slate-300 dark:hover:border-slate-700 transition-colors">
+          <CardContent className="p-4 sm:p-5 flex items-center justify-between">
+            <div className="space-y-1">
+              <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                Active Automations
+              </p>
+              <h3 className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                {activeCount} {activeCount === 1 ? 'Schedule' : 'Schedules'}
+              </h3>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500">Live recurring routines</p>
+            </div>
+            <div className="w-11 h-11 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 border border-blue-100 dark:border-blue-900/60">
               <Repeat className="w-5 h-5" />
             </div>
-            <div>
-              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Active Automations</p>
-              <h3 className="text-xl font-bold text-slate-900 mt-0.5">{activeCount} Schedules</h3>
-            </div>
           </CardContent>
         </Card>
 
-        <Card className="shadow-2xs">
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
+        {/* Milestone Plans */}
+        <Card className="border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-xs hover:border-slate-300 dark:hover:border-slate-700 transition-colors">
+          <CardContent className="p-4 sm:p-5 flex items-center justify-between">
+            <div className="space-y-1">
+              <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                Milestone Plans
+              </p>
+              <h3 className="text-2xl font-extrabold text-purple-600 dark:text-purple-400 tracking-tight">
+                {milestoneCount} {milestoneCount === 1 ? 'Project' : 'Projects'}
+              </h3>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500">Phased milestone deliveries</p>
+            </div>
+            <div className="w-11 h-11 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0 border border-purple-100 dark:border-purple-900/60">
               <Calendar className="w-5 h-5" />
             </div>
-            <div>
-              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Milestone Plans</p>
-              <h3 className="text-xl font-bold text-slate-900 mt-0.5">{milestoneCount} Projects</h3>
-            </div>
           </CardContent>
         </Card>
 
-        <Card className="shadow-2xs">
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-              <CheckCircle2 className="w-5 h-5" />
+        {/* Auto-Generation Status */}
+        <Card className="border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-xs hover:border-slate-300 dark:hover:border-slate-700 transition-colors">
+          <CardContent className="p-4 sm:p-5 flex items-center justify-between">
+            <div className="space-y-1">
+              <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                Auto-Generation
+              </p>
+              <h3 className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight">
+                Self-Executing
+              </h3>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500">Triggered on target dates</p>
             </div>
-            <div>
-              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Auto-Generation</p>
-              <h3 className="text-xl font-bold text-slate-900 mt-0.5">Automated on Date</h3>
+            <div className="w-11 h-11 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-100 dark:border-emerald-900/60">
+              <CheckCircle2 className="w-5 h-5" />
             </div>
           </CardContent>
         </Card>
       </div>
 
       {/* Schedules List */}
-      <Card className="shadow-2xs overflow-hidden">
-        <CardHeader className="pb-3 border-b border-slate-100 flex flex-row items-center justify-between">
+      <Card className="border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-xs overflow-hidden">
+        <CardHeader className="pb-3 border-b border-slate-100 dark:border-slate-800 flex flex-row items-center justify-between">
           <div>
-            <CardTitle className="text-sm font-bold text-slate-900">Active Billing Schedules</CardTitle>
-            <CardDescription className="text-xs">
-              Bills are generated with the next sequential number when their date arrives
+            <CardTitle className="text-sm font-bold text-slate-900 dark:text-white">
+              Active Billing Schedules
+            </CardTitle>
+            <CardDescription className="text-xs text-slate-500 dark:text-slate-400">
+              Bills are generated with the next sequential invoice number when their due date arrives
             </CardDescription>
           </div>
         </CardHeader>
 
         <CardContent className="p-0">
           {loading ? (
-            <div className="p-12 text-center text-xs text-slate-400">Loading automations...</div>
+            <div className="p-12 text-center text-xs text-slate-400 dark:text-slate-500">
+              Loading automations...
+            </div>
           ) : schedules.length === 0 ? (
             <div className="p-12 text-center space-y-3">
-              <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+              <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 flex items-center justify-center mx-auto">
                 <Repeat className="w-6 h-6" />
               </div>
-              <p className="text-sm font-semibold text-slate-700">No billing automations created yet</p>
-              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+              <p className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                No billing automations created yet
+              </p>
+              <p className="text-xs text-slate-400 dark:text-slate-500 max-w-sm mx-auto">
                 Create a recurring monthly subscription or upload a list of milestone dates to auto-generate bills.
               </p>
               <Button
                 size="sm"
-                onClick={() => setIsModalOpen(true)}
-                className="text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white"
+                onClick={() => {
+                  resetForm();
+                  setIsModalOpen(true);
+                }}
+                className="text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white shadow-xs"
               >
                 Create Your First Automation
               </Button>
             </div>
           ) : (
-            <div className="divide-y divide-slate-100">
+            <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
               {schedules.map((schedule) => {
                 const isMonthly = schedule.schedule_type === 'MONTHLY_SUBSCRIPTION';
                 const monthlyTotal = isMonthly
@@ -382,16 +415,21 @@ export const Automations: React.FC<AutomationsProps> = ({
                   : [];
 
                 return (
-                  <div key={schedule.id} className="p-4.5 hover:bg-slate-50/50 transition flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div className="space-y-1.5 flex-1">
+                  <div
+                    key={schedule.id}
+                    className="p-4 sm:p-5 hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition flex flex-col md:flex-row md:items-center justify-between gap-4"
+                  >
+                    <div className="space-y-2 flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-slate-900 text-sm">{schedule.name}</span>
+                        <span className="font-bold text-slate-900 dark:text-white text-sm">
+                          {schedule.name}
+                        </span>
                         <Badge
                           variant="outline"
                           className={`text-[10px] font-semibold ${
                             isMonthly
-                              ? 'bg-blue-50 text-blue-700 border-blue-200'
-                              : 'bg-purple-50 text-purple-700 border-purple-200'
+                              ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-900/60'
+                              : 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-900/60'
                           }`}
                         >
                           {isMonthly ? 'Monthly Subscription' : 'Milestone Schedule'}
@@ -400,67 +438,76 @@ export const Automations: React.FC<AutomationsProps> = ({
                           variant="outline"
                           className={`text-[10px] font-semibold ${
                             schedule.status === 'ACTIVE'
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/60'
                               : schedule.status === 'PAUSED'
-                              ? 'bg-amber-50 text-amber-700 border-amber-200'
-                              : 'bg-slate-100 text-slate-600 border-slate-200'
+                              ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-900/60'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
                           }`}
                         >
                           {schedule.status}
                         </Badge>
                       </div>
 
-                      <div className="flex items-center gap-4 text-xs text-slate-500 flex-wrap">
-                        <span className="flex items-center gap-1 font-medium text-slate-700">
-                          <Building2 className="w-3.5 h-3.5 text-slate-400" />
-                          {schedule.org_name || 'Client Organization'}
+                      <div className="flex items-center gap-2 sm:gap-3 text-xs text-slate-500 dark:text-slate-400 flex-wrap">
+                        <span className="flex items-center gap-1 font-medium text-slate-700 dark:text-slate-300">
+                          <Building2 className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
+                          <span>{schedule.org_name || 'Client Organization'}</span>
                         </span>
                         <span>•</span>
-                        <span>Doc Type: <strong className="text-slate-700">{schedule.doc_type}</strong></span>
+                        <span>
+                          Doc Type: <strong className="text-slate-700 dark:text-slate-200">{schedule.doc_type}</strong>
+                        </span>
                         <span>•</span>
-                        <span>Amount: <strong className="text-slate-900 font-mono">₹{formatINR(monthlyTotal)}</strong></span>
+                        <span>
+                          Amount: <strong className="text-slate-900 dark:text-white font-mono">₹{formatINR(monthlyTotal)}</strong>
+                        </span>
                       </div>
 
                       {/* Schedule info row */}
-                      <div className="pt-1 flex items-center gap-3 text-xs">
+                      <div className="pt-0.5 flex items-center gap-3 text-xs">
                         {isMonthly ? (
-                          <span className="text-slate-600 flex items-center gap-1">
-                            <Clock className="w-3.5 h-3.5 text-blue-500" />
-                            Runs on <strong>Day {schedule.monthly_day || 1}</strong> of each month
+                          <span className="text-slate-600 dark:text-slate-300 flex items-center gap-1 flex-wrap">
+                            <Clock className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400 shrink-0" />
+                            <span>Runs on <strong>Day {schedule.monthly_day || 1}</strong> of each month</span>
                             {schedule.next_run_date && (
-                              <span className="text-blue-600 ml-1 font-medium">
+                              <span className="text-blue-600 dark:text-blue-400 font-medium">
                                 (Next: {schedule.next_run_date})
                               </span>
                             )}
                           </span>
                         ) : (
-                          <div className="space-y-1 w-full max-w-lg">
-                            <span className="text-slate-600 flex items-center gap-1">
-                              <Calendar className="w-3.5 h-3.5 text-purple-500" />
-                              Milestones: <strong>{generatedMilestones.length} of {schedule.milestones?.length || 0} bills generated</strong>
+                          <div className="space-y-1.5 w-full max-w-2xl">
+                            <span className="text-slate-600 dark:text-slate-300 flex items-center gap-1 flex-wrap">
+                              <Calendar className="w-3.5 h-3.5 text-purple-500 dark:text-purple-400 shrink-0" />
+                              <span>
+                                Milestones: <strong>{generatedMilestones.length} of {schedule.milestones?.length || 0} bills generated</strong>
+                              </span>
                               {schedule.next_run_date && (
-                                <span className="text-purple-600 ml-1 font-medium">
+                                <span className="text-purple-600 dark:text-purple-400 font-medium">
                                   (Next due: {schedule.next_run_date})
                                 </span>
                               )}
                             </span>
                             {/* Milestone Pills */}
-                            <div className="flex flex-wrap gap-1.5 pt-1">
+                            <div className="flex flex-wrap gap-1.5 pt-0.5">
                               {(schedule.milestones || []).map((m, idx) => (
                                 <span
                                   key={m.id || idx}
                                   className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-medium border ${
                                     m.invoiceId
-                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                      : 'bg-slate-100 text-slate-600 border-slate-200'
+                                      ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/60'
+                                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
                                   }`}
                                 >
-                                  {m.invoiceId ? '✓' : '○'} {m.date} (₹{formatINR(m.amount)})
+                                  <span>{m.invoiceId ? '✓' : '○'}</span>
+                                  <span>{m.date}</span>
+                                  <span className="text-slate-400 dark:text-slate-500">·</span>
+                                  <span>₹{formatINR(m.amount)}</span>
                                   {m.invoiceNumber && (
                                     <Button
                                       variant="link"
                                       onClick={() => m.invoiceId && onViewInvoice(m.invoiceId)}
-                                      className="p-0 h-auto text-emerald-800 hover:text-emerald-950 font-bold ml-0.5 text-[10px]"
+                                      className="p-0 h-auto text-emerald-800 dark:text-emerald-300 hover:text-emerald-950 dark:hover:text-emerald-100 font-bold ml-0.5 text-[10px]"
                                     >
                                       {m.invoiceNumber}
                                     </Button>
@@ -474,22 +521,22 @@ export const Automations: React.FC<AutomationsProps> = ({
                     </div>
 
                     {/* Actions */}
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => handleToggleStatus(schedule)}
-                        className="gap-1 text-xs"
+                        className="gap-1.5 text-xs font-semibold border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 shadow-2xs"
                       >
                         {schedule.status === 'ACTIVE' ? (
                           <>
-                            <Pause className="w-3 h-3 text-amber-600" />
-                            Pause
+                            <Pause className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                            <span>Pause</span>
                           </>
                         ) : (
                           <>
-                            <Play className="w-3 h-3 text-emerald-600" />
-                            Resume
+                            <Play className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                            <span>Resume</span>
                           </>
                         )}
                       </Button>
@@ -498,7 +545,8 @@ export const Automations: React.FC<AutomationsProps> = ({
                         variant="ghost"
                         size="icon"
                         onClick={() => handleDelete(schedule.id)}
-                        className="h-8 w-8 text-slate-400 hover:text-rose-600"
+                        className="h-8 w-8 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                        title="Delete automation"
                       >
                         <Trash2 className="w-4 h-4" />
                       </Button>
@@ -513,207 +561,219 @@ export const Automations: React.FC<AutomationsProps> = ({
 
       {/* Create Automation Modal */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="max-w-2xl p-6 space-y-5 max-h-[92vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl p-6 space-y-5 max-h-[92vh] overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl">
           <DialogHeader className="pb-3 border-b border-slate-100 dark:border-slate-800">
-            <DialogTitle className="text-base font-bold text-slate-900 dark:text-white">
-              Create Billing Automation
+            <DialogTitle className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900/60">
+                <Zap className="w-4 h-4" />
+              </div>
+              <span>Create Billing Automation</span>
             </DialogTitle>
-            <DialogDescription className="text-xs text-slate-400">
-              Set up automatic bill generation on specific dates
+            <DialogDescription className="text-xs text-slate-500 dark:text-slate-400">
+              Set up automated bill generation triggered on recurring monthly dates or milestone deadlines
             </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleSaveSchedule} className="space-y-4">
             {/* Type Switcher */}
-            <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
+            <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 rounded-xl">
               <Button
                 type="button"
                 variant={scheduleType === 'MONTHLY_SUBSCRIPTION' ? 'secondary' : 'ghost'}
                 size="sm"
                 onClick={() => setScheduleType('MONTHLY_SUBSCRIPTION')}
-                className={`py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 ${
+                className={`py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all ${
                   scheduleType === 'MONTHLY_SUBSCRIPTION'
                     ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-2xs'
-                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <Repeat className="w-3.5 h-3.5" />
-                Monthly Subscription
+                <span>Monthly Subscription</span>
               </Button>
               <Button
                 type="button"
                 variant={scheduleType === 'MILESTONE_LIST' ? 'secondary' : 'ghost'}
                 size="sm"
                 onClick={() => setScheduleType('MILESTONE_LIST')}
-                className={`py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 ${
+                className={`py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all ${
                   scheduleType === 'MILESTONE_LIST'
                     ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-2xs'
-                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <Calendar className="w-3.5 h-3.5" />
-                Scheduled Dates & Milestones
+                <span>Scheduled Dates & Milestones</span>
               </Button>
             </div>
 
-              {/* Basic Fields */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Client Organization *
-                  </label>
-                  <Select value={orgId} onValueChange={(val) => setOrgId(val)}>
-                    <SelectTrigger className="w-full h-9 text-xs font-semibold bg-slate-50">
-                      <SelectValue placeholder="-- Select Client --" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {organizations.map((org) => (
-                        <SelectItem key={org.id} value={org.id}>
-                          {org.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+            {/* Basic Fields */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Client Organization *
+                </label>
+                <Select value={orgId} onValueChange={(val) => setOrgId(val)}>
+                  <SelectTrigger className="w-full h-9 text-xs font-semibold bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white">
+                    <SelectValue placeholder="-- Select Client --" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white">
+                    {organizations.map((org) => (
+                      <SelectItem key={org.id} value={org.id} className="cursor-pointer">
+                        {org.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Automation Title *
+                </label>
+                <Input
+                  type="text"
+                  required
+                  placeholder={
+                    scheduleType === 'MONTHLY_SUBSCRIPTION'
+                      ? 'e.g. Monthly Retainer / Maintenance'
+                      : 'e.g. 3-Stage Website Contract'
+                  }
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Document Type
+                </label>
+                <Select value={docType} onValueChange={(val) => setDocType(val as DocType)}>
+                  <SelectTrigger className="w-full h-9 text-xs bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white">
+                    <SelectValue placeholder="Select Doc Type" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white">
+                    <SelectItem value="BILL OF SUPPLY">BILL OF SUPPLY</SelectItem>
+                    <SelectItem value="INVOICE">INVOICE</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {scheduleType === 'MONTHLY_SUBSCRIPTION' ? (
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Automation Title *
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Billing Day of Month (1-31)
                   </label>
                   <Input
-                    type="text"
+                    type="number"
+                    min={1}
+                    max={31}
                     required
-                    placeholder={
-                      scheduleType === 'MONTHLY_SUBSCRIPTION'
-                        ? 'e.g. Monthly Retainer / Maintenance'
-                        : 'e.g. 3-Stage Website Contract'
-                    }
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    value={monthlyDay}
+                    onChange={(e) => setMonthlyDay(parseInt(e.target.value, 10) || 1)}
+                    className="bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 dark:text-white"
                   />
                 </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Document Type
-                  </label>
-                  <Select value={docType} onValueChange={(val) => setDocType(val as DocType)}>
-                    <SelectTrigger className="w-full h-9 text-xs">
-                      <SelectValue placeholder="Select Doc Type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="BILL OF SUPPLY">BILL OF SUPPLY</SelectItem>
-                      <SelectItem value="INVOICE">INVOICE</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {scheduleType === 'MONTHLY_SUBSCRIPTION' ? (
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Billing Day of Month (1-31)
-                    </label>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={31}
-                      required
-                      value={monthlyDay}
-                      onChange={(e) => setMonthlyDay(parseInt(e.target.value, 10) || 1)}
-                    />
-                  </div>
-                ) : (
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Total Project / Contract Amount (₹)
-                    </label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={totalAmount}
-                      onChange={(e) => setTotalAmount(e.target.value)}
-                      placeholder="e.g. 60000"
-                      className="font-mono"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Mode Specific: Monthly Items vs Milestone Dates */}
-              {scheduleType === 'MONTHLY_SUBSCRIPTION' ? (
-                <div className="space-y-2 pt-2 border-t border-slate-100">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wide">
-                      Monthly Recurring Service Item
-                    </label>
-                  </div>
-                  {items.map((item, idx) => (
-                    <div key={item.id || idx} className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                      <div className="md:col-span-2">
-                        <Input
-                          type="text"
-                          value={item.description}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setItems((prev) => prev.map((i, pIdx) => (pIdx === idx ? { ...i, description: val } : i)));
-                          }}
-                          placeholder="Service description..."
-                        />
-                      </div>
-                      <div>
-                        <Input
-                          type="number"
-                          value={item.rate}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0;
-                            setItems((prev) =>
-                              prev.map((i, pIdx) => (pIdx === idx ? { ...i, rate: val, amount: val * i.qty } : i))
-                            );
-                          }}
-                          placeholder="Monthly Rate (₹)"
-                          className="font-mono"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
               ) : (
-                /* Scheduled Milestones with 1-Click Auto-Division */
-                <div className="space-y-3 pt-2 border-t border-slate-100">
-                  <div className="flex items-center justify-between flex-wrap gap-2">
-                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wide">
-                      Target Dates & Installment Amounts
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={handleDivideTotalEvenly}
-                        className="text-[11px] font-bold h-7 gap-1 text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200"
-                      >
-                        <Calculator className="w-3 h-3" />
-                        Divide Total Evenly Across Dates
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleAddMilestone}
-                        className="text-[11px] font-semibold h-7 gap-1"
-                      >
-                        <Plus className="w-3 h-3" />
-                        Add Date
-                      </Button>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Total Project / Contract Amount (₹)
+                  </label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={totalAmount}
+                    onChange={(e) => setTotalAmount(e.target.value)}
+                    placeholder="e.g. 60000"
+                    className="font-mono bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Mode Specific: Monthly Items vs Milestone Dates */}
+            {scheduleType === 'MONTHLY_SUBSCRIPTION' ? (
+              <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                    Monthly Recurring Service Item
+                  </label>
+                </div>
+                {items.map((item, idx) => (
+                  <div key={item.id || idx} className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                    <div className="md:col-span-2">
+                      <Input
+                        type="text"
+                        value={item.description}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setItems((prev) => prev.map((i, pIdx) => (pIdx === idx ? { ...i, description: val } : i)));
+                        }}
+                        placeholder="Service description..."
+                        className="bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                      />
+                    </div>
+                    <div>
+                      <Input
+                        type="number"
+                        value={item.rate}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value) || 0;
+                          setItems((prev) =>
+                            prev.map((i, pIdx) => (pIdx === idx ? { ...i, rate: val, amount: val * i.qty } : i))
+                          );
+                        }}
+                        placeholder="Monthly Rate (₹)"
+                        className="font-mono bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                      />
                     </div>
                   </div>
+                ))}
+              </div>
+            ) : (
+              /* Scheduled Milestones with 1-Click Auto-Division */
+              <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                    Target Dates & Installment Amounts
+                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={handleDivideTotalEvenly}
+                      className="text-[11px] font-bold h-7 gap-1 text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 dark:hover:bg-purple-900/60 border border-purple-200 dark:border-purple-900/60 shadow-2xs"
+                    >
+                      <Calculator className="w-3 h-3" />
+                      <span>Divide Total Evenly Across Dates</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleAddMilestone}
+                      className="text-[11px] font-semibold h-7 gap-1 border-slate-200 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Add Date</span>
+                    </Button>
+                  </div>
+                </div>
 
-                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                    {milestones.map((m, idx) => (
-                      <div key={m.id || idx} className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg flex items-center gap-2">
-                        <span className="text-[11px] font-bold text-slate-400 w-5">#{idx + 1}</span>
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                  {milestones.map((m, idx) => (
+                    <div
+                      key={m.id || idx}
+                      className="p-2.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 rounded-xl flex flex-col sm:flex-row items-stretch sm:items-center gap-2"
+                    >
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 w-5">
+                          #{idx + 1}
+                        </span>
                         <Input
                           type="date"
                           value={m.date}
@@ -723,20 +783,22 @@ export const Automations: React.FC<AutomationsProps> = ({
                               prev.map((item, i) => (i === idx ? { ...item, date: val } : item))
                             );
                           }}
-                          className="h-8 px-2 text-xs font-mono w-36"
+                          className="h-8 px-2 text-xs font-mono w-34 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 dark:text-white"
                         />
-                        <Input
-                          type="text"
-                          value={m.description}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setMilestones((prev) =>
-                              prev.map((item, i) => (i === idx ? { ...item, description: val } : item))
-                            );
-                          }}
-                          placeholder="Milestone description..."
-                          className="flex-1 h-8 px-2 text-xs"
-                        />
+                      </div>
+                      <Input
+                        type="text"
+                        value={m.description}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setMilestones((prev) =>
+                            prev.map((item, i) => (i === idx ? { ...item, description: val } : item))
+                          );
+                        }}
+                        placeholder="Milestone description..."
+                        className="flex-1 h-8 px-2 text-xs bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                      />
+                      <div className="flex items-center gap-2 shrink-0">
                         <Input
                           type="number"
                           value={m.amount}
@@ -747,7 +809,7 @@ export const Automations: React.FC<AutomationsProps> = ({
                             );
                           }}
                           placeholder="Amount (₹)"
-                          className="w-28 h-8 px-2 text-xs font-mono text-right font-semibold"
+                          className="w-28 h-8 px-2 text-xs font-mono text-right font-semibold bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
                         />
                         <Button
                           type="button"
@@ -755,43 +817,44 @@ export const Automations: React.FC<AutomationsProps> = ({
                           size="icon"
                           onClick={() => handleRemoveMilestone(idx)}
                           disabled={milestones.length <= 1}
-                          className="h-8 w-8 text-slate-400 hover:text-rose-600 p-1 disabled:opacity-30"
+                          className="h-8 w-8 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 p-1 disabled:opacity-30"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </Button>
                       </div>
-                    ))}
-                  </div>
-
-                  <div className="p-2 bg-purple-50/50 rounded-lg text-xs flex justify-between text-purple-900 font-semibold">
-                    <span>Sum of Milestones:</span>
-                    <span className="font-mono">
-                      ₹{formatINR(milestones.reduce((acc, m) => acc + (Number(m.amount) || 0), 0))}
-                    </span>
-                  </div>
+                    </div>
+                  ))}
                 </div>
-              )}
 
-              {/* Submit Buttons */}
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setIsModalOpen(false)}
-                  className="text-xs font-semibold"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  className="text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  Save & Enable Automation
-                </Button>
+                <div className="p-2.5 bg-purple-50/70 dark:bg-purple-950/40 border border-purple-200/80 dark:border-purple-900/50 rounded-xl text-xs flex justify-between text-purple-900 dark:text-purple-300 font-semibold">
+                  <span>Sum of Milestones:</span>
+                  <span className="font-mono">
+                    ₹{formatINR(milestones.reduce((acc, m) => acc + (Number(m.amount) || 0), 0))}
+                  </span>
+                </div>
               </div>
-            </form>
-          </DialogContent>
-        </Dialog>
+            )}
+
+            {/* Submit Buttons */}
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsModalOpen(false)}
+                className="text-xs font-semibold dark:border-slate-700 dark:hover:bg-slate-800 dark:text-slate-300"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white shadow-xs"
+              >
+                Save & Enable Automation
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

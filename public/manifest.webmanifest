@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "Financial Operations Console",
-  "short_name": "Billings",
+  "name": "Suren's Accounts",
+  "short_name": "Suren's Accounts",
   "description": "Manage your billing, expenses, and budgets.",
   "lang": "en",
   "start_url": "/",

@@ -94,6 +94,9 @@ CREATE TABLE borrowing_accounts (
   version INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+INSERT INTO "borrowing_accounts" ("id","name","account_type","version","created_at") VALUES('cd550f9d-f838-4bc1-9c3d-109a4c9417cd','Slice','CREDIT',1,'2026-11-04 14:25:33');
+INSERT INTO "borrowing_accounts" ("id","name","account_type","version","created_at") VALUES('4861dd20-0450-49a5-bf6e-535ce6c3abee','HDFC Credit Card','CREDIT',1,'2026-11-04 14:26:38');
+INSERT INTO "borrowing_accounts" ("id","name","account_type","version","created_at") VALUES('df5114c8-87f6-4a18-9602-235fd4b1a453','Amazon Pay Later','CREDIT',1,'2026-11-04 14:27:15');
 CREATE TABLE borrowing_commands (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES borrowing_accounts(id) ON DELETE CASCADE,
@@ -102,6 +105,9 @@ CREATE TABLE borrowing_commands (
   result_json TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+INSERT INTO "borrowing_commands" ("id","account_id","expected_version","fingerprint","result_json","created_at") VALUES('ac2321cd-3a9b-4455-ac24-ceb4231220c8','cd550f9d-f838-4bc1-9c3d-109a4c9417cd',0,'{"path":"/api/budget/borrowing-accounts","body":{"name":"Slice","account_type":"CREDIT","opening_paise":6300000,"date":"2026-08-04","notes":"Borrow account"}}','{"success":true,"account_id":"cd550f9d-f838-4bc1-9c3d-109a4c9417cd","transaction_id":"85daa7cd-16f1-4fe0-af3b-12413eaf5dbd"}','2026-11-04 14:25:33');
+INSERT INTO "borrowing_commands" ("id","account_id","expected_version","fingerprint","result_json","created_at") VALUES('9e072a17-daf1-4395-86eb-a783a33029eb','4861dd20-0450-49a5-bf6e-535ce6c3abee',0,'{"path":"/api/budget/borrowing-accounts","body":{"name":"HDFC Credit Card","account_type":"CREDIT","opening_paise":0,"date":"2026-08-04","notes":""}}','{"success":true,"account_id":"4861dd20-0450-49a5-bf6e-535ce6c3abee","transaction_id":null}','2026-11-04 14:26:38');
+INSERT INTO "borrowing_commands" ("id","account_id","expected_version","fingerprint","result_json","created_at") VALUES('98ba8b3d-2ee1-4f10-a62d-64a20969c746','df5114c8-87f6-4a18-9602-235fd4b1a453',0,'{"path":"/api/budget/borrowing-accounts","body":{"name":"Amazon Pay Later","account_type":"CREDIT","opening_paise":0,"date":"2026-08-04","notes":""}}','{"success":true,"account_id":"df5114c8-87f6-4a18-9602-235fd4b1a453","transaction_id":null}','2026-11-04 14:27:15');
 CREATE TABLE borrow_records (
   id TEXT PRIMARY KEY,
   date TEXT NOT NULL,
@@ -135,6 +141,12 @@ CREATE TABLE income_entries (
   notes TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+INSERT INTO "income_entries" ("id","date","month","category","source","amount","invoice_id","notes","created_at") VALUES('inc_ace638ed-598e-42d7-b8eb-9d3de9111f8d','2026-10-02','2026-10','fl','Meker Project',7000,NULL,'','2026-11-04 15:24:43');
+INSERT INTO "income_entries" ("id","date","month","category","source","amount","invoice_id","notes","created_at") VALUES('inc_d18b712c-9d70-4683-b4c0-6ee0cfd3e2b4','2026-10-03','2026-10','ext','Dad',5000,NULL,'','2026-11-04 15:25:55');
+INSERT INTO "income_entries" ("id","date","month","category","source","amount","invoice_id","notes","created_at") VALUES('inc_bc6b9838-5d90-4f74-b4e4-c24cdc315759','2026-10-04','2026-10','ext','Dad',6000,NULL,'','2026-11-04 15:26:20');
+INSERT INTO "income_entries" ("id","date","month","category","source","amount","invoice_id","notes","created_at") VALUES('inc_d9050587-70c0-4eee-93f2-f93693e9ad2b','2026-10-06','2026-10','saving','Kotak Savings',3000,NULL,'','2026-11-04 15:26:50');
+INSERT INTO "income_entries" ("id","date","month","category","source","amount","invoice_id","notes","created_at") VALUES('inc_a997a532-3bcf-4917-b533-849e34dedcbd','2026-11-01','2026-11','sal','Edusofthub Salary',45000,NULL,'Monthly Salary','2026-11-04 15:42:01');
+INSERT INTO "income_entries" ("id","date","month","category","source","amount","invoice_id","notes","created_at") VALUES('inc-with-1793806962062','2026-11-01','2026-11','fl','Current Account (Owner Draw)',5000,NULL,'Freelance income draw from SBI Current Account','2026-11-04 15:42:42');
 CREATE TABLE current_account_withdrawals (
   id TEXT PRIMARY KEY,
   date TEXT NOT NULL,
@@ -144,6 +156,7 @@ CREATE TABLE current_account_withdrawals (
   income_entry_id TEXT REFERENCES income_entries(id) ON DELETE SET NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+INSERT INTO "current_account_withdrawals" ("id","date","month","amount","notes","income_entry_id","created_at") VALUES('with-1793806962062','2026-11-01','2026-11',5000,'Freelance income draw from SBI Current Account','inc-with-1793806962062','2026-11-04 15:42:42');
 CREATE TABLE expense_categories (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -172,6 +185,7 @@ CREATE TABLE expenses (
   borrowing_account_id TEXT REFERENCES borrowing_accounts(id) ON DELETE SET NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+INSERT INTO "expenses" ("id","date","month","category","tag","description","amount","payment_method","notes","tax_classification","business_percentage","gst_rate","gst_itc_eligible","has_invoice_voucher","voucher_ref","linked_borrow_id","borrowing_account_id","created_at") VALUES('exp_fb5116a4-0359-476d-ab94-7c22c5bacb21','2026-09-19','2026-09','ext','Travel','Sikkim Trip',2600,'UPI / Bank','Sikkim Trip Hotel','BUSINESS_DEDUCTIBLE',100,0,0,0,'',NULL,NULL,'2026-11-03 19:16:32');
 CREATE TABLE borrowing_transactions (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES borrowing_accounts(id) ON DELETE CASCADE,
@@ -189,6 +203,7 @@ CREATE TABLE borrowing_transactions (
   command_id TEXT NOT NULL REFERENCES borrowing_commands(id),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+INSERT INTO "borrowing_transactions" ("id","account_id","date","kind","amount_paise","debt_delta_paise","cash_delta_paise","description","payment_method","notes","original_record_id","reverses_id","effective_order","command_id","created_at") VALUES('85daa7cd-16f1-4fe0-af3b-12413eaf5dbd','cd550f9d-f838-4bc1-9c3d-109a4c9417cd','2026-08-04','OPENING',6300000,6300000,0,'Opening balance','UPI / Bank','Borrow account',NULL,NULL,0,'ac2321cd-3a9b-4455-ac24-ceb4231220c8','2026-11-04 14:25:33');
 CREATE TABLE borrowing_bills (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES borrowing_accounts(id) ON DELETE CASCADE,

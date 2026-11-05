@@ -169,7 +169,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const cashflowBarData = [
     {
       name: 'Cashflow Flow',
-      Inflow: (budgetSummary?.total_income || 0) + (budgetSummary?.previous_remaining || 0),
+      Inflow: budgetSummary?.total_inflow || budgetSummary?.total_income || 0,
       Outflow: budgetSummary?.total_expense || 0,
       Savings: budgetSummary?.total_savings || 0,
     },

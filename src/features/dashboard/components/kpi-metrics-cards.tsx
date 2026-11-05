@@ -62,7 +62,7 @@ export const KpiMetricsCards: React.FC<KpiMetricsCardsProps> = ({
       {/* Total Inflow (Personal) */}
       <KpiMetricCard
         title="Month Inflow"
-        value={`₹${formatINR((budgetSummary?.total_income || 0) + (budgetSummary?.previous_remaining || 0))}`}
+        value={`₹${formatINR(budgetSummary?.total_inflow || budgetSummary?.total_income || 0)}`}
         valueClassName="text-emerald-600 dark:text-emerald-400"
         icon={<ArrowUpRight className="w-3.5 h-3.5" />}
         iconContainerClassName="bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400"

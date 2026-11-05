@@ -117,7 +117,7 @@ function NewAccount({ onCreated }: { onCreated: (id: string) => void }) {
           New borrowing account
         </Button>
       ) : (
-        <div className="space-y-3 p-3 border border-slate-200 dark:border-slate-800 rounded-xl bg-card">
+        <div className="space-y-3 p-3 border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900 shadow-sm">
           <label className="block text-sm font-medium">
             Account name
             <Input
@@ -243,7 +243,7 @@ export function AccountPaymentDialog({
 }) {
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="p-5 max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="p-5 max-w-lg max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl">
         <DialogTitle className="sr-only">Record account transaction</DialogTitle>
         <DialogDescription className="sr-only">Record or modify a borrowing account transaction</DialogDescription>
         <TransactionForm
@@ -960,7 +960,7 @@ export function BorrowingAccountsView({
       )}
       {correction && (
         <Dialog open onOpenChange={(open) => !open && setCorrection(null)}>
-          <DialogContent className="p-5 max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogContent className="p-5 max-w-lg max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl">
             <DialogTitle className="sr-only">Correct account transaction</DialogTitle>
             <DialogDescription className="sr-only">Update an existing transaction record for this borrowing account</DialogDescription>
             <TransactionForm
@@ -990,7 +990,7 @@ export function AccountCorrectionDialog({
 }) {
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="p-5 max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="p-5 max-w-lg max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl">
         <DialogTitle className="sr-only">Correct credit expense</DialogTitle>
         <DialogDescription className="sr-only">Update and correct credit expense transaction details</DialogDescription>
         <TransactionForm

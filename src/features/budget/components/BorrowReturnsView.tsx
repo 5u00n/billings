@@ -717,19 +717,19 @@ export const BorrowReturnsView: React.FC<BorrowReturnsViewProps> = ({
 
       {/* Add / Edit Modal */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="max-w-md p-0 overflow-hidden">
-          <DialogHeader className="px-6 py-4 bg-slate-50 border-b border-slate-200">
-            <DialogTitle className="text-sm font-bold text-slate-900">
+        <DialogContent className="max-w-md p-0 overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+          <DialogHeader className="px-6 py-4 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700">
+            <DialogTitle className="text-sm font-bold text-slate-900 dark:text-white">
               {editingRecord ? 'Edit Loan / Debt Record' : 'Record New Loan / Debt'}
             </DialogTitle>
-            <DialogDescription className="text-xs text-slate-500">
+            <DialogDescription className="text-xs text-slate-500 dark:text-slate-400">
               Track borrowed liabilities or money lent to contacts.
             </DialogDescription>
           </DialogHeader>
 
-            <form onSubmit={handleSave} className="p-6 space-y-4">
+            <form onSubmit={handleSave} className="p-6 space-y-4 bg-white dark:bg-slate-900">
               <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                   Transaction Type
                 </label>
                 <div className="grid grid-cols-2 gap-2">
@@ -809,9 +809,9 @@ export const BorrowReturnsView: React.FC<BorrowReturnsViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Status</label>
+                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Status</label>
                 <Select value={status} onValueChange={(val) => setStatus(val as any)}>
-                  <SelectTrigger className="w-full text-xs h-9 bg-white">
+                  <SelectTrigger className="w-full text-xs h-9 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 border-slate-200 dark:border-slate-700">
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -821,7 +821,7 @@ export const BorrowReturnsView: React.FC<BorrowReturnsViewProps> = ({
                 </Select>
               </div>
 
-              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
                 <Button
                   type="button"
                   variant="outline"

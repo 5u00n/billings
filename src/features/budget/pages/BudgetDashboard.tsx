@@ -471,6 +471,12 @@ export const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ profile }) => 
               <span>Starting Debt from Previous</span>
               <span>₹{formatINR(summary?.starting_debt || 0)}</span>
             </div>
+            {Boolean(summary?.legacy_debt && summary.legacy_debt > 0) && (
+              <div className="flex justify-between items-center text-amber-600 dark:text-amber-400 text-[11px] pt-1 border-t border-slate-100 dark:border-slate-800">
+                <span>Legacy Debt / Shortfall</span>
+                <span>₹{formatINR(summary?.legacy_debt || 0)}</span>
+              </div>
+            )}
           </div>
         </div>
 
